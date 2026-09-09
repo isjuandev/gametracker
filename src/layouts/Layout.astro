@@ -1,23 +1,50 @@
+---
+import Sidebar from "../components/Sidebar.astro";
+import TopHeader from "../components/TopHeader.astro";
+
+interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = "Horas de Juego",
+  description = "Registra y visualiza tu tiempo de juego",
+} = Astro.props;
+const currentPath = Astro.url.pathname;
+---
+
 <!doctype html>
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro Basics</title>
-	</head>
-	<body>
-		<slot />
-	</body>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="description" content={description} />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title} | Registro Horas</title>
+  </head>
+  <body>
+    <div class="app-shell">
+      <!-- Fixed Left Sidebar -->
+      <Sidebar currentPath={currentPath} />
+
+      <!-- Main Layout Body -->
+      <div class="app-main-wrap">
+        <!-- Top Navigation Header -->
+        <TopHeader currentPath={currentPath} />
+
+        <!-- Main Content Area -->
+        <main class="app-content">
+          <slot />
+        </main>
+      </div>
+    </div>
+
+    <div id="toast-container" class="toast-container"></div>
+  </body>
 </html>
 
-<style>
-	html,
-	body {
-		margin: 0;
-		width: 100%;
-		height: 100%;
-	}
+<style is:global>
+  @import "../styles/global.css";
 </style>

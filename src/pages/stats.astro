@@ -1,0 +1,329 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { supabase } from '../lib/supabase';
+import { formatTime } from '../types/database';
+import type { Game, TimeEntry, GameWithStats } from '../types/database';
+
+// Fetch games & entries
+const { data: games } = await supabase.from('games').select('*');
+const { data: entries } = await supabase.from('time_entries').select('*').order('played_at', { ascending: false });
+
+const allGames = (games || []) as Game[];
+const allEntries = (entries || []) as TimeEntry[];
+
+// Calculate statistics
+const totalsMap = new Map<string, { total_seconds: number; entries_count: number }>();
+let totalSeconds = 0;
+
+for (const entry of allEntries) {
+  const cur = totalsMap.get(entry.game_id) || { total_seconds: 0, entries_count: 0 };
+  cur.total_seconds += entry.total_seconds;
+  cur.entries_count += 1;
+  totalsMap.set(entry.game_id, cur);
+  totalSeconds += entry.total_seconds;
+}
+
+const gamesWithStats: GameWithStats[] = allGames.map((g) => ({
+  ...g,
+  ...(totalsMap.get(g.id) || { total_seconds: 0, entries_count: 0 }),
+}));
+
+// Sort by playtime descending
+gamesWithStats.sort((a, b) => b.total_seconds - a.total_seconds);
+
+const topGame = gamesWithStats[0] || null;
+const totalSessions = allEntries.length;
+const avgSecondsPerSession = totalSessions > 0 ? Math.round(totalSeconds / totalSessions) : 0;
+const completedCount = allGames.filter(g => g.status === 'completed').length;
+const playingCount = allGames.filter(g => g.status === 'playing').length;
+const maxPlaytime = topGame ? topGame.total_seconds : 1;
+---
+
+<Layout title="Estadísticas">
+  <div class="section-header-block animate-fade-in">
+    <div class="section-title-wrap">
+      <h1 class="section-title-mark">Estadísticas de Juego</h1>
+    </div>
+    <p class="section-subtitle">Métricas de rendimiento, tiempos acumulados y récords de tus partidas</p>
+  </div>
+
+  <!-- Highlights Banner -->
+  <div class="stats-overview-grid animate-slide-up">
+    <!-- Favorite / Most Played Game Card -->
+    {topGame ? (
+      <div class="stat-highlight-card">
+        <div class="highlight-badge">🏆 JUEGO MÁS JUGADO</div>
+        <div class="highlight-content">
+          {topGame.cover_url && (
+            <img src={topGame.cover_url} alt={topGame.name} class="highlight-cover" />
+          )}
+          <div class="highlight-info">
+            <h2 class="highlight-title">{topGame.name}</h2>
+            <div class="highlight-time">{formatTime(topGame.total_seconds)}</div>
+            <p class="highlight-meta">{topGame.entries_count} sesiones registradas</p>
+            <a href={`/games/${topGame.id}`} class="btn btn-secondary btn-sm" style="margin-top: 8px;">Ver detalles →</a>
+          </div>
+        </div>
+      </div>
+    ) : null}
+
+    <!-- Quick Metrics Column -->
+    <div class="metrics-summary-box">
+      <div class="metric-mini-item">
+        <span class="mini-label">PROMEDIO POR SESIÓN</span>
+        <span class="mini-value">{avgSecondsPerSession > 0 ? formatTime(avgSecondsPerSession) : '0m'}</span>
+      </div>
+      <div class="metric-mini-item">
+        <span class="mini-label">SESIONES TOTALES</span>
+        <span class="mini-value">{totalSessions}</span>
+      </div>
+      <div class="metric-mini-item">
+        <span class="mini-label">JUEGOS COMPLETADOS</span>
+        <span class="mini-value">{completedCount}</span>
+      </div>
+      <div class="metric-mini-item">
+        <span class="mini-label">JUGANDO ACTIVAMENTE</span>
+        <span class="mini-value">{playingCount}</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playtime Ranking Bars -->
+  <section class="section animate-slide-up" style="margin-top: var(--space-2xl);">
+    <div class="section-header-block">
+      <div class="section-title-wrap">
+        <h2 class="section-title-mark">Ranking por Tiempo Dedicado</h2>
+      </div>
+    </div>
+
+    <div class="ranking-card card">
+      {gamesWithStats.map((game, index) => {
+        const percent = Math.max(4, Math.round((game.total_seconds / (maxPlaytime || 1)) * 100));
+        return (
+          <div class="ranking-row">
+            <div class="ranking-index">#{index + 1}</div>
+            <div class="ranking-art">
+              {game.cover_url ? (
+                <img src={game.cover_url} alt={game.name} class="ranking-thumb" />
+              ) : (
+                <div class="ranking-placeholder">🎮</div>
+              )}
+            </div>
+            <div class="ranking-details">
+              <div class="ranking-header">
+                <a href={`/games/${game.id}`} class="ranking-name">{game.name}</a>
+                <span class="ranking-time">{formatTime(game.total_seconds)}</span>
+              </div>
+              <div class="ranking-bar-bg">
+                <div class="ranking-bar-fill" style={`width: ${percent}%;`}></div>
+              </div>
+              <div class="ranking-footer">
+                <span>{game.entries_count} sesiones</span>
+                <span>{percent}% del máximo</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  </section>
+</Layout>
+
+<style>
+  .stats-overview-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: var(--space-lg);
+    margin-top: var(--space-md);
+  }
+
+  @media (max-width: 900px) {
+    .stats-overview-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .stat-highlight-card {
+    position: relative;
+    background: linear-gradient(135deg, #161824 0%, #0e1017 100%);
+    border: 1px solid rgba(229, 57, 53, 0.4);
+    border-radius: var(--radius-lg);
+    padding: var(--space-xl);
+    overflow: hidden;
+    box-shadow: 0 0 25px rgba(229, 57, 53, 0.15);
+  }
+
+  .highlight-badge {
+    display: inline-block;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    color: #ff3344;
+    background: rgba(229, 57, 53, 0.15);
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-bottom: var(--space-md);
+  }
+
+  .highlight-content {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xl);
+  }
+
+  .highlight-cover {
+    width: 100px;
+    height: 140px;
+    object-fit: cover;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+    flex-shrink: 0;
+  }
+
+  .highlight-title {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+
+  .highlight-time {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: var(--color-accent);
+    margin-bottom: 4px;
+  }
+
+  .highlight-meta {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+  }
+
+  .metrics-summary-box {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+  }
+
+  .metric-mini-item {
+    background: #0d0f16;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .mini-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: #8b8c9e;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+
+  .mini-value {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #ffffff;
+  }
+
+  /* Ranking rows */
+  .ranking-card {
+    padding: var(--space-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+  }
+
+  .ranking-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+  }
+
+  .ranking-index {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 800;
+    color: #6b6b80;
+    width: 32px;
+    flex-shrink: 0;
+  }
+
+  .ranking-thumb {
+    width: 44px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .ranking-placeholder {
+    width: 44px;
+    height: 56px;
+    background: #1c1e28;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .ranking-details {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .ranking-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+
+  .ranking-name {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: #fff;
+    text-decoration: none;
+  }
+
+  .ranking-name:hover {
+    color: var(--color-accent);
+  }
+
+  .ranking-time {
+    font-family: var(--font-display);
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: var(--color-accent);
+  }
+
+  .ranking-bar-bg {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+
+  .ranking-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #e53935, #ff3344);
+    border-radius: 4px;
+    box-shadow: 0 0 10px rgba(229, 57, 53, 0.5);
+  }
+
+  .ranking-footer {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.6875rem;
+    color: var(--color-text-muted);
+  }
+</style>

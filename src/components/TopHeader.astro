@@ -1,0 +1,281 @@
+---
+interface Props {
+  currentPath?: string;
+}
+
+const { currentPath = Astro.url.pathname } = Astro.props;
+---
+
+<header class="topbar-header">
+  <div class="topbar-left">
+    <!-- Mobile sidebar hamburger toggle -->
+    <button class="topbar-menu-toggle" id="sidebar-toggle" aria-label="Abrir menú">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="12" x2="21" y2="12"></line>
+        <line x1="3" y1="6" x2="21" y2="6"></line>
+        <line x1="3" y1="18" x2="21" y2="18"></line>
+      </svg>
+    </button>
+
+    <!-- Global Instant Game Search -->
+    <div class="search-box">
+      <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <input
+        type="search"
+        id="global-game-search"
+        class="search-input"
+        placeholder="Buscar juegos..."
+        autocomplete="off"
+      />
+    </div>
+  </div>
+
+  <div class="topbar-right">
+    <!-- Quick Nav Pills -->
+    <nav class="quick-nav">
+      <a href="/" class:list={['quick-nav-pill', { active: currentPath === '/' }]}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+        </svg>
+        <span>Dashboard</span>
+      </a>
+      <a href="/games" class:list={['quick-nav-pill', { active: currentPath.startsWith('/games') }]}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect width="20" height="12" x="2" y="6" rx="2"></rect>
+        </svg>
+        <span>Juegos</span>
+      </a>
+      <a href="/import" class:list={['quick-nav-pill', { active: currentPath.startsWith('/import') }]}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+        </svg>
+        <span>Importar</span>
+      </a>
+    </nav>
+
+    <!-- User Profile & Settings -->
+    <div class="user-profile-group">
+      <a href="/settings" class="topbar-icon-btn" title="Configuración">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+      </a>
+
+      <div class="user-avatar-badge" title="Gamer Profile">
+        <div class="avatar-circle">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path>
+            <circle cx="12" cy="7" r="4"></circle>
+          </svg>
+        </div>
+        <svg class="avatar-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </div>
+    </div>
+  </div>
+</header>
+
+<script>
+  // Mobile sidebar toggle
+  const toggleBtn = document.getElementById('sidebar-toggle');
+  const sidebar = document.getElementById('app-sidebar');
+
+  toggleBtn?.addEventListener('click', () => {
+    sidebar?.classList.toggle('open');
+  });
+
+  // Global search input handling
+  const searchInput = document.getElementById('global-game-search') as HTMLInputElement;
+  searchInput?.addEventListener('input', (e) => {
+    const query = (e.target as HTMLInputElement).value.trim().toLowerCase();
+    const event = new CustomEvent('global-game-search', { detail: { query } });
+    window.dispatchEvent(event);
+  });
+</script>
+
+<style>
+  .topbar-header {
+    height: 60px;
+    background: #08090f;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 var(--space-xl);
+    position: sticky;
+    top: 0;
+    z-index: 90;
+    backdrop-filter: blur(12px);
+  }
+
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex: 1;
+    max-width: 460px;
+  }
+
+  .topbar-menu-toggle {
+    display: none;
+    background: transparent;
+    border: none;
+    color: #a0a0b8;
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 6px;
+  }
+
+  .topbar-menu-toggle:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  /* Search Box */
+  .search-box {
+    position: relative;
+    width: 100%;
+    display: flex;
+    align-items: center;
+  }
+
+  .search-icon {
+    position: absolute;
+    left: 12px;
+    color: #6b6b80;
+    pointer-events: none;
+  }
+
+  .search-input {
+    width: 100%;
+    height: 36px;
+    padding: 0 14px 0 36px;
+    background: #11131a;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-full);
+    color: #ffffff;
+    font-size: 0.8125rem;
+    font-family: var(--font-body);
+    transition: all var(--transition-fast);
+  }
+
+  .search-input:focus {
+    outline: none;
+    border-color: rgba(229, 57, 53, 0.5);
+    box-shadow: 0 0 12px rgba(229, 57, 53, 0.2);
+    background: #151722;
+  }
+
+  .search-input::placeholder {
+    color: #555768;
+  }
+
+  /* Right Section */
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+  }
+
+  .quick-nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .quick-nav-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #8b8c9e;
+    text-decoration: none;
+    transition: all var(--transition-fast);
+    border: 1px solid transparent;
+  }
+
+  .quick-nav-pill:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .quick-nav-pill.active {
+    color: #ff3344;
+    background: rgba(229, 57, 53, 0.12);
+    border-color: rgba(229, 57, 53, 0.35);
+  }
+
+  /* User Profile Group */
+  .user-profile-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .topbar-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: #8b8c9e;
+    transition: all var(--transition-fast);
+  }
+
+  .topbar-icon-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .user-avatar-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 6px;
+    border-radius: var(--radius-full);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .user-avatar-badge:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .avatar-circle {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #2a2d3d, #1a1c26);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #a0a0b8;
+  }
+
+  .avatar-chevron {
+    color: #6b6b80;
+  }
+
+  @media (max-width: 900px) {
+    .topbar-menu-toggle {
+      display: inline-flex;
+    }
+
+    .quick-nav {
+      display: none;
+    }
+  }
+</style>

@@ -1,0 +1,569 @@
+---
+import Layout from '../layouts/Layout.astro';
+---
+
+<Layout title="Importar Datos">
+  <div class="section-header-block animate-fade-in">
+    <div class="section-title-wrap">
+      <h1 class="section-title-mark">Importar Datos</h1>
+    </div>
+    <p class="section-subtitle">Importa y sincroniza tus registros desde archivos Excel (.xlsx)</p>
+  </div>
+
+    <!-- Import Section -->
+    <section class="section animate-slide-up">
+      <div class="section-header">
+        <h2 class="section-title">📥 Importar desde Excel (.xlsx)</h2>
+      </div>
+
+      <div class="import-zone card" id="import-zone">
+        <div class="import-dropzone" id="dropzone">
+          <div class="import-dropzone-icon">📁</div>
+          <div class="import-dropzone-title">Arrastra tus archivos aquí</div>
+          <p class="import-dropzone-text">o haz clic para seleccionar archivos .xlsx</p>
+          <input type="file" id="file-input" accept=".xlsx,.xls" multiple hidden />
+          <button class="btn btn-secondary" id="btn-select-files" style="margin-top: var(--space-md);">
+            Seleccionar Archivos
+          </button>
+        </div>
+
+        <!-- Selected files list -->
+        <div id="files-list" class="files-list" style="display: none;"></div>
+
+        <!-- Actions -->
+        <div id="import-actions" class="import-actions" style="display: none;">
+          <button class="btn btn-secondary btn-lg" id="btn-preview">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+            Vista Previa
+          </button>
+          <button class="btn btn-primary btn-lg" id="btn-import" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Importar Datos
+          </button>
+        </div>
+      </div>
+
+      <!-- Preview results -->
+      <div id="preview-section" class="preview-section" style="display: none;">
+        <div class="section-header" style="margin-top: var(--space-xl);">
+          <h2 class="section-title">📊 Vista Previa de Importación</h2>
+        </div>
+
+        <div id="preview-stats" class="stats-grid stagger-children" style="margin-bottom: var(--space-lg);"></div>
+
+        <div id="preview-games" class="preview-games-table card" style="padding: 0; overflow: hidden;"></div>
+
+        <div id="preview-sheets" style="margin-top: var(--space-md);"></div>
+
+        <div id="preview-errors" style="margin-top: var(--space-md);"></div>
+      </div>
+
+      <!-- Import results -->
+      <div id="result-section" class="result-section" style="display: none;">
+        <div class="section-header" style="margin-top: var(--space-xl);">
+          <h2 class="section-title">✅ Resultado de Importación</h2>
+        </div>
+        <div id="result-content" class="card"></div>
+      </div>
+    </section>
+
+    <!-- Help Section -->
+    <section class="section animate-slide-up" style="animation-delay: 100ms;">
+      <div class="section-header">
+        <h2 class="section-title">ℹ️ Formato Esperado</h2>
+      </div>
+
+      <div class="card" style="padding: var(--space-xl);">
+        <p style="color: var(--color-text-secondary); margin-bottom: var(--space-md);">
+          El importador lee automáticamente las hojas de <strong style="color: var(--color-text-primary);">Cronograma</strong> de tus archivos Excel. Busca:
+        </p>
+        <ul class="help-list">
+          <li>
+            <strong>Fechas</strong> en las columnas de fecha (formato Excel)
+          </li>
+          <li>
+            <strong>Nombres de juego</strong> como "Spiderman 1", "Futbol", etc.
+          </li>
+          <li>
+            <strong>Tiempos</strong> en formato texto como "3 Horas 5 Minutos", "30 Minutos", "1 Hora"
+          </li>
+          <li>
+            <strong>Anexos</strong> con juegos/tiempos adicionales en formato "Juego / Tiempo"
+          </li>
+        </ul>
+        <p style="color: var(--color-text-muted); margin-top: var(--space-md); font-size: 0.875rem;">
+          💡 Las hojas de "Tiempo" (resúmenes mensuales) se ignoran ya que los datos detallados están en los cronogramas.
+        </p>
+      </div>
+    </section>
+</Layout>
+
+<style>
+  .import-dropzone {
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-3xl);
+    text-align: center;
+    transition: all var(--transition-base);
+    cursor: pointer;
+  }
+
+  .import-dropzone:hover,
+  .import-dropzone.drag-over {
+    border-color: var(--color-accent);
+    background: var(--color-accent-soft);
+  }
+
+  .import-dropzone.drag-over {
+    transform: scale(1.01);
+    box-shadow: var(--shadow-glow);
+  }
+
+  .import-dropzone-icon {
+    font-size: 3rem;
+    margin-bottom: var(--space-md);
+  }
+
+  .import-dropzone-title {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 600;
+    margin-bottom: var(--space-xs);
+  }
+
+  .import-dropzone-text {
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+  }
+
+  .files-list {
+    margin-top: var(--space-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .file-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--color-bg-elevated);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border-subtle);
+  }
+
+  .file-item-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .file-item-name {
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .file-item-size {
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+  }
+
+  .import-actions {
+    display: flex;
+    gap: var(--space-md);
+    margin-top: var(--space-lg);
+    justify-content: center;
+  }
+
+  .preview-games-table table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .preview-games-table th,
+  .preview-games-table td {
+    padding: var(--space-sm) var(--space-lg);
+    text-align: left;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .preview-games-table th {
+    background: var(--color-bg-secondary);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+  }
+
+  .preview-games-table td {
+    font-size: 0.875rem;
+  }
+
+  .preview-games-table tr:hover td {
+    background: var(--color-bg-card-hover);
+  }
+
+  .help-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .help-list li {
+    padding-left: var(--space-lg);
+    position: relative;
+    color: var(--color-text-secondary);
+    font-size: 0.9375rem;
+  }
+
+  .help-list li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--color-accent);
+  }
+
+  .help-list li strong {
+    color: var(--color-text-primary);
+  }
+
+  .result-success {
+    color: var(--color-success);
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: var(--space-md);
+  }
+
+  .result-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    font-size: 0.9375rem;
+    color: var(--color-text-secondary);
+  }
+
+  .result-detail strong {
+    color: var(--color-text-primary);
+  }
+
+  /* Loading spinner */
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--color-bg-overlay);
+    backdrop-filter: blur(8px);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-md);
+  }
+
+  .spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid var(--color-border);
+    border-top-color: var(--color-accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .loading-text {
+    font-size: 1rem;
+    color: var(--color-text-secondary);
+  }
+
+  @media (max-width: 768px) {
+    .import-actions {
+      flex-direction: column;
+    }
+
+    .import-dropzone {
+      padding: var(--space-xl);
+    }
+  }
+</style>
+
+<script>
+  const fileInput = document.getElementById('file-input') as HTMLInputElement;
+  const dropzone = document.getElementById('dropzone') as HTMLElement;
+  const btnSelect = document.getElementById('btn-select-files') as HTMLElement;
+  const filesList = document.getElementById('files-list') as HTMLElement;
+  const importActions = document.getElementById('import-actions') as HTMLElement;
+  const btnPreview = document.getElementById('btn-preview') as HTMLElement;
+  const btnImport = document.getElementById('btn-import') as HTMLButtonElement;
+  const previewSection = document.getElementById('preview-section') as HTMLElement;
+  const resultSection = document.getElementById('result-section') as HTMLElement;
+
+  let selectedFiles: File[] = [];
+
+  // Click to select
+  btnSelect.addEventListener('click', (e) => {
+    e.stopPropagation();
+    fileInput.click();
+  });
+
+  dropzone.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files) {
+      selectedFiles = Array.from(fileInput.files);
+      renderFilesList();
+    }
+  });
+
+  // Drag & drop
+  dropzone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropzone.classList.add('drag-over');
+  });
+
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('drag-over');
+  });
+
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('drag-over');
+    if (e.dataTransfer?.files) {
+      selectedFiles = Array.from(e.dataTransfer.files).filter(
+        (f) => f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
+      );
+      renderFilesList();
+    }
+  });
+
+  function renderFilesList() {
+    if (selectedFiles.length === 0) {
+      filesList.style.display = 'none';
+      importActions.style.display = 'none';
+      return;
+    }
+
+    filesList.style.display = 'flex';
+    importActions.style.display = 'flex';
+    btnImport.disabled = true;
+
+    filesList.innerHTML = selectedFiles
+      .map(
+        (f) => `
+        <div class="file-item">
+          <div class="file-item-info">
+            <span>📄</span>
+            <span class="file-item-name">${f.name}</span>
+          </div>
+          <span class="file-item-size">${(f.size / 1024).toFixed(1)} KB</span>
+        </div>
+      `
+      )
+      .join('');
+
+    // Reset previous results
+    previewSection.style.display = 'none';
+    resultSection.style.display = 'none';
+  }
+
+  // Preview
+  btnPreview.addEventListener('click', async () => {
+    if (selectedFiles.length === 0) return;
+
+    showLoading('Analizando archivos...');
+
+    const formData = new FormData();
+    for (const file of selectedFiles) {
+      formData.append('files', file);
+    }
+    formData.append('action', 'preview');
+
+    try {
+      const res = await fetch('/api/import', { method: 'POST', body: formData });
+      const data = await res.json();
+
+      hideLoading();
+
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Error al analizar', 'error');
+        return;
+      }
+
+      renderPreview(data);
+      btnImport.disabled = false;
+    } catch {
+      hideLoading();
+      showToast('Error de conexión', 'error');
+    }
+  });
+
+  // Import
+  btnImport.addEventListener('click', async () => {
+    if (selectedFiles.length === 0) return;
+
+    if (!confirm('¿Importar todos los datos? Esto creará juegos y registros de tiempo nuevos.')) {
+      return;
+    }
+
+    showLoading('Importando datos a Supabase...');
+
+    const formData = new FormData();
+    for (const file of selectedFiles) {
+      formData.append('files', file);
+    }
+    formData.append('action', 'import');
+
+    try {
+      const res = await fetch('/api/import', { method: 'POST', body: formData });
+      const data = await res.json();
+
+      hideLoading();
+
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Error al importar', 'error');
+        return;
+      }
+
+      renderResult(data);
+      showToast('¡Datos importados correctamente!', 'success');
+    } catch {
+      hideLoading();
+      showToast('Error de conexión', 'error');
+    }
+  });
+
+  function renderPreview(data: any) {
+    previewSection.style.display = 'block';
+    resultSection.style.display = 'none';
+
+    // Stats
+    const statsEl = document.getElementById('preview-stats')!;
+    statsEl.innerHTML = `
+      <div class="stat-card">
+        <div class="stat-icon">📋</div>
+        <div class="stat-value">${data.totalEntries}</div>
+        <div class="stat-label">Registros</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🎮</div>
+        <div class="stat-value">${data.games.length}</div>
+        <div class="stat-label">Juegos</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">📑</div>
+        <div class="stat-value">${data.sheetsParsed.length}</div>
+        <div class="stat-label">Hojas</div>
+      </div>
+    `;
+
+    // Games table
+    const gamesEl = document.getElementById('preview-games')!;
+    const rows = data.games
+      .sort((a: any, b: any) => b.entriesCount - a.entriesCount)
+      .map(
+        (g: any) => `
+        <tr>
+          <td style="font-weight: 600;">${g.name}</td>
+          <td style="font-family: var(--font-display); color: var(--color-accent); font-weight: 600;">${g.totalHours}h ${g.totalMinutes}m</td>
+          <td>${g.entriesCount}</td>
+        </tr>
+      `
+      )
+      .join('');
+
+    gamesEl.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Juego</th>
+            <th>Tiempo Total</th>
+            <th>Sesiones</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+
+    // Sheets parsed
+    const sheetsEl = document.getElementById('preview-sheets')!;
+    sheetsEl.innerHTML = `
+      <p style="font-size: 0.8125rem; color: var(--color-text-muted);">
+        📑 Hojas procesadas: ${data.sheetsParsed.join(', ')}
+      </p>
+    `;
+
+    // Errors
+    const errorsEl = document.getElementById('preview-errors')!;
+    if (data.errors && data.errors.length > 0) {
+      errorsEl.innerHTML = `
+        <div class="card" style="border-color: rgba(255,82,82,0.3); padding: var(--space-md);">
+          <p style="color: var(--color-danger); font-weight: 600; margin-bottom: var(--space-sm);">⚠️ Advertencias:</p>
+          ${data.errors.map((e: string) => `<p style="font-size: 0.8125rem; color: var(--color-text-muted);">• ${e}</p>`).join('')}
+        </div>
+      `;
+    } else {
+      errorsEl.innerHTML = '';
+    }
+  }
+
+  function renderResult(data: any) {
+    resultSection.style.display = 'block';
+    previewSection.style.display = 'none';
+
+    const resultEl = document.getElementById('result-content')!;
+    resultEl.innerHTML = `
+      <div style="padding: var(--space-xl);">
+        <div class="result-success">✅ Importación Completada</div>
+        <div class="result-detail">
+          <p>📋 <strong>${data.insertedEntries}</strong> registros de tiempo importados</p>
+          <p>🎮 <strong>${data.gamesCreated}</strong> juegos nuevos creados</p>
+          <p>📑 Hojas procesadas: ${data.sheetsParsed.join(', ')}</p>
+          ${data.errors.length > 0 ? `<p style="color: var(--color-warning);">⚠️ ${data.errors.length} advertencia(s)</p>` : ''}
+        </div>
+        <div style="margin-top: var(--space-lg);">
+          <a href="/games" class="btn btn-primary">Ver Mis Juegos →</a>
+        </div>
+      </div>
+    `;
+  }
+
+  function showLoading(text: string) {
+    const overlay = document.createElement('div');
+    overlay.id = 'loading-overlay';
+    overlay.className = 'loading-overlay';
+    overlay.innerHTML = `
+      <div class="spinner"></div>
+      <div class="loading-text">${text}</div>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  function hideLoading() {
+    const overlay = document.getElementById('loading-overlay');
+    overlay?.remove();
+  }
+
+  function showToast(message: string, type: 'success' | 'error') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = type === 'success' ? `✓ ${message}` : `✕ ${message}`;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  }
+</script>

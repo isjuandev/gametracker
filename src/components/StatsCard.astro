@@ -1,0 +1,165 @@
+---
+interface Props {
+  iconType?: 'games' | 'today' | 'week' | 'month' | 'total';
+  rawIcon?: string;
+  label: string;
+  value: string;
+  subtitle: string;
+  isHighlighted?: boolean;
+}
+
+const {
+  iconType = 'games',
+  rawIcon,
+  label,
+  value,
+  subtitle,
+  isHighlighted = false,
+} = Astro.props;
+---
+
+<div class:list={['metric-card', { highlighted: isHighlighted }]}>
+  <!-- Top: Icon & Label -->
+  <div class="metric-top">
+    <div class="metric-icon-wrap">
+      {rawIcon ? (
+        <span class="raw-icon">{rawIcon}</span>
+      ) : iconType === 'games' ? (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="6" y1="12" x2="10" y2="12"></line>
+          <line x1="8" y1="10" x2="8" y2="14"></line>
+          <line x1="15" y1="13" x2="15.01" y2="13"></line>
+          <line x1="18" y1="11" x2="18.01" y2="11"></line>
+          <rect width="20" height="12" x="2" y="6" rx="6"></rect>
+        </svg>
+      ) : iconType === 'today' ? (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+      ) : iconType === 'week' || iconType === 'month' ? (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
+          <line x1="16" y1="2" x2="16" y2="6"></line>
+          <line x1="8" y1="2" x2="8" y2="6"></line>
+          <line x1="3" y1="10" x2="21" y2="10"></line>
+        </svg>
+      ) : (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
+          <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
+          <path d="M4 22h16"></path>
+          <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"></path>
+          <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"></path>
+          <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"></path>
+        </svg>
+      )}
+    </div>
+    <span class="metric-label">{label}</span>
+  </div>
+
+  <!-- Middle: Big Value -->
+  <div class="metric-value">{value}</div>
+
+  <!-- Bottom: Subtitle -->
+  <div class="metric-subtitle">{subtitle}</div>
+
+  <!-- Characteristic Diagonal Corner Slash Accent -->
+  <div class="corner-slash" aria-hidden="true"></div>
+</div>
+
+<style>
+  .metric-card {
+    position: relative;
+    background: #0d0f16;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 120px;
+    overflow: hidden;
+    transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  }
+
+  .metric-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(229, 57, 53, 0.35);
+    background: #11131c;
+  }
+
+  /* Highlighted style for "Tiempo Total" */
+  .metric-card.highlighted {
+    border-color: rgba(229, 57, 53, 0.65);
+    background: linear-gradient(135deg, #130f14 0%, #0d0f16 100%);
+    box-shadow: 0 0 20px rgba(229, 57, 53, 0.2), inset 0 0 12px rgba(229, 57, 53, 0.08);
+  }
+
+  .metric-card.highlighted .metric-value {
+    color: #ff3344;
+    text-shadow: 0 0 12px rgba(229, 57, 53, 0.4);
+  }
+
+  /* Top row */
+  .metric-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .metric-icon-wrap {
+    color: var(--color-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .metric-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #8b8c9e;
+    text-transform: uppercase;
+  }
+
+  /* Big Display Value */
+  .metric-value {
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #ffffff;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Subtitle */
+  .metric-subtitle {
+    font-size: 0.75rem;
+    color: #555768;
+  }
+
+  /* Characteristic Diagonal Corner Slash */
+  .corner-slash {
+    position: absolute;
+    bottom: -6px;
+    right: -6px;
+    width: 24px;
+    height: 16px;
+    background: linear-gradient(135deg, transparent 50%, var(--color-accent) 50%);
+    opacity: 0.85;
+    pointer-events: none;
+  }
+
+  .metric-card.highlighted .corner-slash {
+    width: 28px;
+    height: 20px;
+    background: linear-gradient(135deg, transparent 50%, #ff1744 50%);
+    box-shadow: 0 0 10px rgba(255, 23, 68, 0.6);
+  }
+</style>

@@ -1,0 +1,332 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import GameCard from '../../components/GameCard.astro';
+import { supabase } from '../../lib/supabase';
+import type { GameWithStats } from '../../types/database';
+
+// Fetch games
+const { data: games } = await supabase
+  .from('games')
+  .select('*');
+
+// Fetch time entries with played_at to calculate totals and most recent played date
+const { data: timeTotals } = await supabase
+  .from('time_entries')
+  .select('game_id, total_seconds, played_at');
+
+const totalsMap = new Map<string, { total_seconds: number; entries_count: number; last_played_at: string | null }>();
+for (const entry of timeTotals || []) {
+  const current = totalsMap.get(entry.game_id) || { total_seconds: 0, entries_count: 0, last_played_at: null };
+  current.total_seconds += entry.total_seconds;
+  current.entries_count += 1;
+  if (!current.last_played_at || entry.played_at > current.last_played_at) {
+    current.last_played_at = entry.played_at;
+  }
+  totalsMap.set(entry.game_id, current);
+}
+
+const gamesWithStats: GameWithStats[] = (games || []).map((game) => {
+  const stats = totalsMap.get(game.id) || { total_seconds: 0, entries_count: 0, last_played_at: null };
+  return { ...game, ...stats };
+});
+
+// Sort by most recently played date (descending)
+gamesWithStats.sort((a, b) => {
+  const dateA = a.last_played_at || '';
+  const dateB = b.last_played_at || '';
+  if (dateA !== dateB) {
+    return dateB.localeCompare(dateA);
+  }
+  return (b.updated_at || '').localeCompare(a.updated_at || '');
+});
+---
+
+<Layout title="Mis Juegos">
+  <div class="section-header-block animate-fade-in">
+    <div class="section-title-wrap">
+      <h1 class="section-title-mark">Mis Juegos</h1>
+      <button id="btn-add-game" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        Agregar Juego
+      </button>
+    </div>
+    <p class="section-subtitle">{gamesWithStats.length} {gamesWithStats.length === 1 ? 'juego registrado' : 'juegos registrados en tu biblioteca'}</p>
+  </div>
+
+    <!-- Filter bar -->
+    <div class="filter-bar animate-fade-in" style="margin-bottom: var(--space-xl);">
+      <button class="filter-btn active" data-filter="all">Todos</button>
+      <button class="filter-btn" data-filter="playing">🔥 Jugando</button>
+      <button class="filter-btn" data-filter="completed">✅ Completados</button>
+      <button class="filter-btn" data-filter="paused">⏸️ Pausados</button>
+      <button class="filter-btn" data-filter="dropped">❌ Abandonados</button>
+    </div>
+
+    {gamesWithStats.length > 0 ? (
+      <div id="games-grid" class="games-grid stagger-children">
+        {gamesWithStats.map((game) => (
+          <GameCard game={game} />
+        ))}
+      </div>
+    ) : (
+      <div class="empty-state card">
+        <div class="empty-state-icon">🎮</div>
+        <div class="empty-state-title">No hay juegos registrados</div>
+        <p class="empty-state-text">Haz clic en "Agregar Juego" para comenzar</p>
+      </div>
+    )}
+
+  <!-- Modal: Add/Edit Game -->
+  <div id="game-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modal-title">Agregar Juego</h2>
+        <button class="btn btn-ghost btn-icon" id="modal-close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <form id="game-form" class="modal-body">
+        <input type="hidden" id="game-id" value="" />
+
+        <div class="form-group">
+          <label class="form-label" for="game-name">Nombre del juego *</label>
+          <input type="text" id="game-name" class="form-input" placeholder="Ej: The Legend of Zelda" required />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="game-cover">URL de la portada</label>
+          <input type="url" id="game-cover" class="form-input" placeholder="https://ejemplo.com/imagen.jpg" />
+          <span style="font-size: 0.75rem; color: var(--color-text-muted);">Pega una URL de imagen para la portada del juego</span>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="game-status">Estado</label>
+          <select id="game-status" class="form-select">
+            <option value="playing">🔥 Jugando</option>
+            <option value="completed">✅ Completado</option>
+            <option value="paused">⏸️ Pausado</option>
+            <option value="dropped">❌ Abandonado</option>
+          </select>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" id="modal-cancel">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="modal-submit">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            Guardar
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</Layout>
+
+<style>
+  .filter-bar {
+    display: flex;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+  }
+
+  .filter-btn {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .filter-btn:hover {
+    border-color: var(--color-border-accent);
+    color: var(--color-text-primary);
+    background: var(--color-accent-soft);
+  }
+
+  .filter-btn.active {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+    background: var(--color-accent-soft);
+  }
+</style>
+
+<script>
+  // Modal logic
+  const modal = document.getElementById('game-modal') as HTMLElement;
+  const form = document.getElementById('game-form') as HTMLFormElement;
+  const btnAdd = document.getElementById('btn-add-game') as HTMLElement;
+  const btnClose = document.getElementById('modal-close') as HTMLElement;
+  const btnCancel = document.getElementById('modal-cancel') as HTMLElement;
+  const modalTitle = document.getElementById('modal-title') as HTMLElement;
+  const gameIdInput = document.getElementById('game-id') as HTMLInputElement;
+  const gameNameInput = document.getElementById('game-name') as HTMLInputElement;
+  const gameCoverInput = document.getElementById('game-cover') as HTMLInputElement;
+  const gameStatusSelect = document.getElementById('game-status') as HTMLSelectElement;
+
+  function openModal(editData?: { id: string; name: string; cover_url: string; status: string }) {
+    if (editData) {
+      modalTitle.textContent = 'Editar Juego';
+      gameIdInput.value = editData.id;
+      gameNameInput.value = editData.name;
+      gameCoverInput.value = editData.cover_url;
+      gameStatusSelect.value = editData.status;
+    } else {
+      modalTitle.textContent = 'Agregar Juego';
+      gameIdInput.value = '';
+      form.reset();
+    }
+    modal.classList.add('active');
+    gameNameInput.focus();
+  }
+
+  function closeModal() {
+    modal.classList.remove('active');
+  }
+
+  btnAdd?.addEventListener('click', () => openModal());
+  btnClose?.addEventListener('click', closeModal);
+  btnCancel?.addEventListener('click', closeModal);
+  modal?.addEventListener('click', (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeModal();
+  });
+
+  // Submit form
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const id = gameIdInput.value;
+    const name = gameNameInput.value.trim();
+    const cover_url = gameCoverInput.value.trim();
+    const status = gameStatusSelect.value;
+
+    if (!name) return;
+
+    const body = JSON.stringify({ name, cover_url, status });
+    const isEdit = id !== '';
+
+    try {
+      const res = await fetch(isEdit ? `/api/games/${id}` : '/api/games', {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+
+      if (res.ok) {
+        showToast(isEdit ? 'Juego actualizado' : 'Juego agregado', 'success');
+        closeModal();
+        setTimeout(() => window.location.reload(), 500);
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Error al guardar', 'error');
+      }
+    } catch {
+      showToast('Error de conexión', 'error');
+    }
+  });
+
+  // Edit button clicks
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+
+    const editBtn = target.closest('.edit-game-btn') as HTMLElement;
+    if (editBtn) {
+      openModal({
+        id: editBtn.dataset.gameId || '',
+        name: editBtn.dataset.gameName || '',
+        cover_url: editBtn.dataset.gameCover || '',
+        status: editBtn.dataset.gameStatus || 'playing',
+      });
+    }
+
+    // Delete button
+    const deleteBtn = target.closest('.delete-game-btn') as HTMLElement;
+    if (deleteBtn) {
+      const gameId = deleteBtn.dataset.gameId;
+      const gameName = deleteBtn.dataset.gameName;
+      if (confirm(`¿Eliminar "${gameName}"? Se borrarán todos sus registros de tiempo.`)) {
+        fetch(`/api/games/${gameId}`, { method: 'DELETE' })
+          .then((res) => {
+            if (res.ok) {
+              showToast('Juego eliminado', 'success');
+              setTimeout(() => window.location.reload(), 500);
+            } else {
+              showToast('Error al eliminar', 'error');
+            }
+          })
+          .catch(() => showToast('Error de conexión', 'error'));
+      }
+    }
+  });
+
+  // Filter buttons
+  const filterBtns = document.querySelectorAll('.filter-btn');
+  const gamesGrid = document.getElementById('games-grid');
+
+  filterBtns.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      filterBtns.forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      const filter = (btn as HTMLElement).dataset.filter;
+      if (!gamesGrid) return;
+
+      const cards = gamesGrid.querySelectorAll('.game-card');
+      cards.forEach((card) => {
+        const cardEl = card as HTMLElement;
+        if (filter === 'all') {
+          cardEl.style.display = '';
+        } else {
+          // Check status from badge
+          const badge = card.querySelector('.badge');
+          const statusMap: Record<string, string> = {
+            playing: 'badge-playing',
+            completed: 'badge-completed',
+            paused: 'badge-paused',
+            dropped: 'badge-dropped',
+          };
+          const hasStatus = badge?.classList.contains(statusMap[filter!]);
+          cardEl.style.display = hasStatus ? '' : 'none';
+        }
+      });
+    });
+  });
+
+  // Global search filtering
+  window.addEventListener('global-game-search', ((e: CustomEvent) => {
+    const query = e.detail?.query || '';
+    const cards = gamesGrid?.querySelectorAll('.game-card');
+    cards?.forEach((card) => {
+      const cardEl = card as HTMLElement;
+      const titleEl = card.querySelector('.case-title');
+      const title = titleEl?.textContent?.toLowerCase() || '';
+      cardEl.style.display = !query || title.includes(query) ? '' : 'none';
+    });
+  }) as EventListener);
+
+  // Toast
+  function showToast(message: string, type: 'success' | 'error') {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = type === 'success' ? `✓ ${message}` : `✕ ${message}`;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  }
+</script>

@@ -1,0 +1,550 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import { supabase } from '../../lib/supabase';
+import { formatTime, STATUS_LABELS } from '../../types/database';
+import type { Game, TimeEntry } from '../../types/database';
+
+const { id } = Astro.params;
+
+// Fetch game
+const { data: game, error: gameError } = await supabase
+  .from('games')
+  .select('*')
+  .eq('id', id)
+  .single();
+
+if (gameError || !game) {
+  return Astro.redirect('/games');
+}
+
+// Fetch time entries
+const { data: entries } = await supabase
+  .from('time_entries')
+  .select('*')
+  .eq('game_id', id)
+  .order('played_at', { ascending: false });
+
+const allEntries = (entries || []) as TimeEntry[];
+
+// Calculate stats
+const totalSeconds = allEntries.reduce((sum, e) => sum + e.total_seconds, 0);
+
+const now = new Date();
+const todayStr = now.toISOString().split('T')[0];
+const weekAgo = new Date(now);
+weekAgo.setDate(weekAgo.getDate() - 7);
+const weekAgoStr = weekAgo.toISOString().split('T')[0];
+const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+
+const todaySeconds = allEntries
+  .filter(e => e.played_at === todayStr)
+  .reduce((sum, e) => sum + e.total_seconds, 0);
+
+const weekSeconds = allEntries
+  .filter(e => e.played_at >= weekAgoStr)
+  .reduce((sum, e) => sum + e.total_seconds, 0);
+
+const monthSeconds = allEntries
+  .filter(e => e.played_at >= monthStart)
+  .reduce((sum, e) => sum + e.total_seconds, 0);
+
+const typedGame = game as Game;
+const statusClass = `badge-${typedGame.status}`;
+
+// Group entries by date
+const entriesByDate = new Map<string, TimeEntry[]>();
+for (const entry of allEntries) {
+  const dateEntries = entriesByDate.get(entry.played_at) || [];
+  dateEntries.push(entry);
+  entriesByDate.set(entry.played_at, dateEntries);
+}
+
+function formatDate(dateStr: string): string {
+  const date = new Date(dateStr + 'T12:00:00');
+  return date.toLocaleDateString('es-ES', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+---
+
+<Layout title={typedGame.name}>
+  <div style="position: relative; z-index: 1;">
+    <!-- Back link -->
+    <a href="/games" class="back-link animate-fade-in">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"></line>
+        <polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+      Volver a Juegos
+    </a>
+
+    <!-- Game Header -->
+    <div class="game-detail-header animate-slide-up">
+      <div class="game-detail-cover">
+        {typedGame.cover_url ? (
+          <img src={typedGame.cover_url} alt={typedGame.name} class="game-detail-img" />
+        ) : (
+          <div class="game-detail-placeholder">🎮</div>
+        )}
+      </div>
+      <div class="game-detail-info">
+        <div class="game-detail-meta">
+          <span class={`badge ${statusClass}`}>{STATUS_LABELS[typedGame.status]}</span>
+        </div>
+        <h1 class="game-detail-name">{typedGame.name}</h1>
+        <div class="game-detail-total">
+          <span class="game-detail-total-value">{totalSeconds > 0 ? formatTime(totalSeconds) : '0m'}</span>
+          <span class="game-detail-total-label">tiempo total</span>
+        </div>
+        <div class="game-detail-quick-stats">
+          <div class="quick-stat">
+            <span class="quick-stat-value">{todaySeconds > 0 ? formatTime(todaySeconds) : '—'}</span>
+            <span class="quick-stat-label">Hoy</span>
+          </div>
+          <div class="quick-stat-divider"></div>
+          <div class="quick-stat">
+            <span class="quick-stat-value">{weekSeconds > 0 ? formatTime(weekSeconds) : '—'}</span>
+            <span class="quick-stat-label">Semana</span>
+          </div>
+          <div class="quick-stat-divider"></div>
+          <div class="quick-stat">
+            <span class="quick-stat-value">{monthSeconds > 0 ? formatTime(monthSeconds) : '—'}</span>
+            <span class="quick-stat-label">Mes</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add Time Form -->
+    <section class="section animate-slide-up" style="animation-delay: 100ms;">
+      <div class="section-header">
+        <h2 class="section-title">⏱️ Registrar Tiempo</h2>
+      </div>
+
+      <form id="time-form" class="time-form card">
+        <div class="time-form-row">
+          <div class="time-input-wrapper">
+            <div class="time-input-group">
+              <div>
+                <input type="number" id="time-hours" class="form-input time-input" value="0" min="0" max="999" />
+                <div class="time-label">Horas</div>
+              </div>
+              <span class="time-separator">:</span>
+              <div>
+                <input type="number" id="time-minutes" class="form-input time-input" value="0" min="0" max="59" />
+                <div class="time-label">Minutos</div>
+              </div>
+              <span class="time-separator">:</span>
+              <div>
+                <input type="number" id="time-seconds" class="form-input time-input" value="0" min="0" max="59" />
+                <div class="time-label">Segundos</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="time-form-fields">
+            <div class="form-group">
+              <label class="form-label" for="time-date">Fecha</label>
+              <input type="date" id="time-date" class="form-input" value={todayStr} />
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="time-note">Nota (opcional)</label>
+              <input type="text" id="time-note" class="form-input" placeholder="Ej: Completé el capítulo 3" />
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-lg time-form-submit">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            Agregar
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Time Entries History -->
+    <section class="section animate-slide-up" style="animation-delay: 200ms;">
+      <div class="section-header">
+        <h2 class="section-title">📋 Historial de Sesiones</h2>
+        <span style="font-size: 0.875rem; color: var(--color-text-muted);">
+          {allEntries.length} {allEntries.length === 1 ? 'registro' : 'registros'}
+        </span>
+      </div>
+
+      {allEntries.length > 0 ? (
+        <div class="entries-list">
+          {Array.from(entriesByDate.entries()).map(([date, dateEntries]) => {
+            const dayTotal = dateEntries.reduce((sum, e) => sum + e.total_seconds, 0);
+            return (
+              <div class="date-group">
+                <div class="date-group-header">
+                  <span class="date-group-date">{formatDate(date)}</span>
+                  <span class="date-group-total">{formatTime(dayTotal)}</span>
+                </div>
+                {dateEntries.map((entry) => (
+                  <div class="entry-row" data-entry-id={entry.id}>
+                    <div class="entry-time">{formatTime(entry.total_seconds)}</div>
+                    <div class="entry-detail">
+                      {entry.hours > 0 && <span>{entry.hours}h</span>}
+                      {entry.minutes > 0 && <span>{entry.minutes}m</span>}
+                      {entry.seconds > 0 && <span>{entry.seconds}s</span>}
+                    </div>
+                    {entry.note && <div class="entry-note">{entry.note}</div>}
+                    <button class="btn btn-ghost btn-icon delete-entry-btn" data-entry-id={entry.id} title="Eliminar registro">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div class="empty-state card">
+          <div class="empty-state-icon">⏱️</div>
+          <div class="empty-state-title">Sin registros de tiempo</div>
+          <p class="empty-state-text">Usa el formulario de arriba para agregar tu primera sesión</p>
+        </div>
+      )}
+    </section>
+  </div>
+</Layout>
+
+<style>
+  .back-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+    margin-bottom: var(--space-lg);
+    transition: color var(--transition-fast);
+  }
+
+  .back-link:hover {
+    color: var(--color-accent);
+  }
+
+  /* Game Detail Header */
+  .game-detail-header {
+    display: flex;
+    gap: var(--space-xl);
+    margin-bottom: var(--space-2xl);
+    padding: var(--space-xl);
+    background: var(--color-bg-card);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-xl);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .game-detail-header::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--color-accent), transparent);
+  }
+
+  .game-detail-cover {
+    width: 180px;
+    height: 240px;
+    flex-shrink: 0;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 2px solid var(--color-border);
+  }
+
+  .game-detail-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .game-detail-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 4rem;
+    background: var(--color-bg-elevated);
+    opacity: 0.5;
+  }
+
+  .game-detail-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: var(--space-md);
+  }
+
+  .game-detail-meta {
+    display: flex;
+    gap: var(--space-sm);
+  }
+
+  .game-detail-name {
+    font-size: 2rem;
+    margin: 0;
+  }
+
+  .game-detail-total {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+  }
+
+  .game-detail-total-value {
+    font-family: var(--font-display);
+    font-size: 2.5rem;
+    font-weight: 800;
+    color: var(--color-accent);
+    line-height: 1;
+  }
+
+  .game-detail-total-label {
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .game-detail-quick-stats {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+    margin-top: var(--space-sm);
+  }
+
+  .quick-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .quick-stat-value {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+  }
+
+  .quick-stat-label {
+    font-size: 0.6875rem;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .quick-stat-divider {
+    width: 1px;
+    height: 30px;
+    background: var(--color-border);
+  }
+
+  /* Time Form */
+  .time-form {
+    padding: var(--space-xl);
+  }
+
+  .time-form-row {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-xl);
+    flex-wrap: wrap;
+  }
+
+  .time-input-wrapper {
+    flex-shrink: 0;
+  }
+
+  .time-form-fields {
+    display: flex;
+    gap: var(--space-md);
+    flex: 1;
+    min-width: 300px;
+  }
+
+  .time-form-fields .form-group {
+    flex: 1;
+  }
+
+  .time-form-submit {
+    flex-shrink: 0;
+    align-self: flex-end;
+  }
+
+  /* Date groups */
+  .date-group {
+    margin-bottom: var(--space-md);
+  }
+
+  .date-group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-lg);
+    background: var(--color-bg-secondary);
+    border-radius: var(--radius-sm);
+    margin-bottom: 2px;
+  }
+
+  .date-group-date {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    text-transform: capitalize;
+  }
+
+  .date-group-total {
+    font-family: var(--font-display);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--color-accent);
+  }
+
+  .entry-detail {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    display: flex;
+    gap: var(--space-xs);
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .game-detail-header {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      padding: var(--space-lg);
+    }
+
+    .game-detail-cover {
+      width: 140px;
+      height: 190px;
+    }
+
+    .game-detail-name {
+      font-size: 1.5rem;
+    }
+
+    .game-detail-total-value {
+      font-size: 2rem;
+    }
+
+    .game-detail-total {
+      justify-content: center;
+    }
+
+    .game-detail-quick-stats {
+      justify-content: center;
+    }
+
+    .game-detail-meta {
+      justify-content: center;
+    }
+
+    .time-form-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .time-input-wrapper {
+      display: flex;
+      justify-content: center;
+    }
+
+    .time-form-fields {
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .time-form-submit {
+      align-self: stretch;
+    }
+
+    .entry-row {
+      grid-template-columns: auto 1fr auto;
+    }
+  }
+</style>
+
+<script define:vars={{ gameId: id }}>
+  const form = document.getElementById('time-form');
+
+  form?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const hours = parseInt(document.getElementById('time-hours').value) || 0;
+    const minutes = parseInt(document.getElementById('time-minutes').value) || 0;
+    const seconds = parseInt(document.getElementById('time-seconds').value) || 0;
+    const played_at = document.getElementById('time-date').value;
+    const note = document.getElementById('time-note').value.trim();
+
+    if (hours === 0 && minutes === 0 && seconds === 0) {
+      showToast('El tiempo debe ser mayor a 0', 'error');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/time-entries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game_id: gameId, hours, minutes, seconds, played_at, note }),
+      });
+
+      if (res.ok) {
+        showToast('Tiempo registrado', 'success');
+        setTimeout(() => window.location.reload(), 500);
+      } else {
+        const data = await res.json();
+        showToast(data.error || 'Error al registrar', 'error');
+      }
+    } catch {
+      showToast('Error de conexión', 'error');
+    }
+  });
+
+  // Delete entry
+  document.addEventListener('click', async (e) => {
+    const deleteBtn = e.target.closest('.delete-entry-btn');
+    if (deleteBtn) {
+      if (confirm('¿Eliminar este registro de tiempo?')) {
+        const entryId = deleteBtn.dataset.entryId;
+        try {
+          const res = await fetch(`/api/time-entries/${entryId}`, { method: 'DELETE' });
+          if (res.ok) {
+            showToast('Registro eliminado', 'success');
+            setTimeout(() => window.location.reload(), 500);
+          } else {
+            showToast('Error al eliminar', 'error');
+          }
+        } catch {
+          showToast('Error de conexión', 'error');
+        }
+      }
+    }
+  });
+
+  function showToast(message, type) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = type === 'success' ? `✓ ${message}` : `✕ ${message}`;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  }
+</script>

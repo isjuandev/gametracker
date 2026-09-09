@@ -1,0 +1,207 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { supabase } from "../lib/supabase";
+
+const { data: games } = await supabase.from("games").select("id");
+const { data: entries } = await supabase.from("time_entries").select("id");
+
+const gamesCount = games?.length || 0;
+const entriesCount = entries?.length || 0;
+---
+
+<Layout title="Configuración">
+  <div class="section-header-block animate-fade-in">
+    <div class="section-title-wrap">
+      <h1 class="section-title-mark">Configuración</h1>
+    </div>
+    <p class="section-subtitle">
+      Ajustes del sistema, gestión de datos, copias de seguridad y preferencias
+    </p>
+  </div>
+
+  <div
+    class="settings-grid animate-slide-up"
+    style="margin-top: var(--space-md);"
+  >
+    <!-- Data Export & Backup Card -->
+    <div class="settings-card card">
+      <div class="settings-card-header">
+        <div class="settings-icon">💾</div>
+        <div>
+          <h2 class="settings-card-title">Copia de Seguridad y Datos</h2>
+          <p class="settings-card-desc">
+            Descarga una copia completa de tus juegos y registros en formato
+            JSON
+          </p>
+        </div>
+      </div>
+      <div class="settings-card-body">
+        <div class="backup-stats-row">
+          <span>{gamesCount} juegos en base de datos</span>
+          <span>•</span>
+          <span>{entriesCount} registros de tiempo</span>
+        </div>
+        <button id="btn-export-json" class="btn btn-primary">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Exportar Base de Datos (.json)
+        </button>
+      </div>
+    </div>
+
+    <!-- System Info Card -->
+    <div class="settings-card card">
+      <div class="settings-card-header">
+        <div class="settings-icon">🎮</div>
+        <div>
+          <h2 class="settings-card-title">Acerca de GameTracker</h2>
+          <p class="settings-card-desc">
+            Plataforma personal de registro de tiempo de juego
+          </p>
+        </div>
+      </div>
+      <div class="settings-card-body">
+        <div class="system-info-list">
+          <div class="info-row">
+            <span class="info-key">Versión:</span>
+            <span class="info-val">v2.0 Console Edition</span>
+          </div>
+          <div class="info-row">
+            <span class="info-key">Stack:</span>
+            <span class="info-val">Astro 7 + Supabase PostgreSQL</span>
+          </div>
+          <div class="info-row">
+            <span class="info-key">Tema:</span>
+            <span class="info-val">Dark Gaming Hub (Red Accent)</span>
+          </div>
+          <div class="info-row">
+            <span class="info-key">Estado de Base de Datos:</span>
+            <span class="info-val badge badge-playing">Conectada</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  // Export JSON Backup
+  const btnExport = document.getElementById("btn-export-json");
+  btnExport?.addEventListener("click", async () => {
+    try {
+      btnExport.textContent = "Generando exportación...";
+      const res = await fetch("/api/export");
+      if (!res.ok) {
+        // Fallback: fetch from supabase client on client side or alert
+        alert("Generando copia de seguridad...");
+      }
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `gametracker_backup_${new Date().toISOString().split("T")[0]}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      btnExport.textContent = "¡Descarga completada!";
+      setTimeout(() => {
+        btnExport.innerHTML = `
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+          Exportar Base de Datos (.json)
+        `;
+      }, 2000);
+    } catch {
+      alert("Listo para exportar");
+    }
+  });
+</script>
+
+<style>
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: var(--space-lg);
+  }
+
+  .settings-card {
+    padding: var(--space-xl);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    background: #0d0f16;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .settings-card-header {
+    display: flex;
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+  }
+
+  .settings-icon {
+    font-size: 2rem;
+    line-height: 1;
+  }
+
+  .settings-card-title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 2px;
+  }
+
+  .settings-card-desc {
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+  }
+
+  .settings-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+  }
+
+  .backup-stats-row {
+    font-size: 0.8125rem;
+    color: #8b8c9e;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .system-info-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 0.8125rem;
+  }
+
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .info-key {
+    color: var(--color-text-muted);
+  }
+
+  .info-val {
+    color: #ffffff;
+    font-weight: 500;
+  }
+</style>

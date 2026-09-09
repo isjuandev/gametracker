@@ -12,7 +12,11 @@
     "astro": "astro"
   },
   "dependencies": {
-    "astro": "^7.3.2"
+    "@astrojs/node": "^11.1.5",
+    "@astrojs/vercel": "^11.0.10",
+    "@supabase/supabase-js": "^2.116.0",
+    "astro": "^7.3.2",
+    "xlsx": "^0.18.5"
   },
   "allowScripts": {
     "esbuild": true
