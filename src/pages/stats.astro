@@ -1,7 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { supabase } from '../lib/supabase';
-import { formatTime } from '../types/database';
+import { formatTime, formatTimeShort } from '../types/database';
 import type { Game, TimeEntry, GameWithStats } from '../types/database';
 
 // Fetch games & entries
@@ -11,7 +11,61 @@ const { data: entries } = await supabase.from('time_entries').select('*').order(
 const allGames = (games || []) as Game[];
 const allEntries = (entries || []) as TimeEntry[];
 
-// Calculate statistics
+const gamesMap = new Map<string, Game>(allGames.map((g) => [g.id, g]));
+
+// Helpers for Date & Week
+const MONTH_NAMES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+const MONTH_SHORT = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const DAY_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+function formatDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getWeekRange(dateStr: string) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const day = date.getDay(); // 0 Sun, 1 Mon...
+  const diffToMonday = day === 0 ? -6 : 1 - day;
+  const monday = new Date(y, m - 1, d + diffToMonday);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return {
+    mondayStr: formatDateStr(monday),
+    sundayStr: formatDateStr(sunday),
+    monday,
+    sunday,
+  };
+}
+
+function formatWeekLabel(mondayStr: string, sundayStr: string): string {
+  const [mY, mM, mD] = mondayStr.split('-').map(Number);
+  const [sY, sM, sD] = sundayStr.split('-').map(Number);
+  const monName = MONTH_SHORT[mM - 1];
+  const sunName = MONTH_SHORT[sM - 1];
+
+  if (mY === sY) {
+    if (mM === sM) {
+      return `${String(mD).padStart(2, '0')} - ${String(sD).padStart(2, '0')} ${monName} ${mY}`;
+    }
+    return `${String(mD).padStart(2, '0')} ${monName} - ${String(sD).padStart(2, '0')} ${sunName} ${mY}`;
+  }
+  return `${String(mD).padStart(2, '0')} ${monName} ${mY} - ${String(sD).padStart(2, '0')} ${sunName} ${sY}`;
+}
+
+const now = new Date();
+const todayStr = formatDateStr(now);
+const currentWeekRange = getWeekRange(todayStr);
+const currentMonthStr = todayStr.slice(0, 7);
+
+// 1. ALL-TIME STATS
 const totalsMap = new Map<string, { total_seconds: number; entries_count: number }>();
 let totalSeconds = 0;
 
@@ -28,108 +82,1540 @@ const gamesWithStats: GameWithStats[] = allGames.map((g) => ({
   ...(totalsMap.get(g.id) || { total_seconds: 0, entries_count: 0 }),
 }));
 
-// Sort by playtime descending
 gamesWithStats.sort((a, b) => b.total_seconds - a.total_seconds);
 
 const topGame = gamesWithStats[0] || null;
 const totalSessions = allEntries.length;
 const avgSecondsPerSession = totalSessions > 0 ? Math.round(totalSeconds / totalSessions) : 0;
-const completedCount = allGames.filter(g => g.status === 'completed').length;
-const playingCount = allGames.filter(g => g.status === 'playing').length;
+const completedCount = allGames.filter((g) => g.status === 'completed').length;
+const playingCount = allGames.filter((g) => g.status === 'playing').length;
 const maxPlaytime = topGame ? topGame.total_seconds : 1;
+
+// 2. WEEKS AGGREGATION
+interface GamePeriodStat {
+  game_id: string;
+  name: string;
+  cover_url: string | null;
+  status: Game['status'];
+  total_seconds: number;
+  formatted_time: string;
+  formatted_short: string;
+  entries_count: number;
+  days_count: number;
+  percentage: number;
+}
+
+interface WeekData {
+  id: string; // mondayStr_sundayStr
+  mondayStr: string;
+  sundayStr: string;
+  label: string;
+  isCurrent: boolean;
+  total_seconds: number;
+  formatted_time: string;
+  formatted_short: string;
+  entries_count: number;
+  active_days_count: number;
+  games_count: number;
+  top_game: GamePeriodStat | null;
+  daily_distribution: Array<{
+    date: string;
+    day_name: string;
+    day_short: string;
+    day_num: number;
+    seconds: number;
+    formatted: string;
+    percent: number;
+  }>;
+  games: GamePeriodStat[];
+}
+
+const weeksMap = new Map<string, { mondayStr: string; sundayStr: string; entries: TimeEntry[] }>();
+
+for (const entry of allEntries) {
+  if (!entry.played_at) continue;
+  const { mondayStr, sundayStr } = getWeekRange(entry.played_at);
+  const key = `${mondayStr}_${sundayStr}`;
+  if (!weeksMap.has(key)) {
+    weeksMap.set(key, { mondayStr, sundayStr, entries: [] });
+  }
+  weeksMap.get(key)!.entries.push(entry);
+}
+
+// Also ensure current week exists even if no entries yet
+const curWeekKey = `${currentWeekRange.mondayStr}_${currentWeekRange.sundayStr}`;
+if (!weeksMap.has(curWeekKey)) {
+  weeksMap.set(curWeekKey, {
+    mondayStr: currentWeekRange.mondayStr,
+    sundayStr: currentWeekRange.sundayStr,
+    entries: [],
+  });
+}
+
+// Convert weeksMap to sorted WeekData list (most recent first)
+const sortedWeekKeys = Array.from(weeksMap.keys()).sort().reverse();
+const weeksDataList: WeekData[] = sortedWeekKeys.map((key) => {
+  const { mondayStr, sundayStr, entries: weekEntries } = weeksMap.get(key)!;
+  const isCurrent = key === curWeekKey;
+  const label = formatWeekLabel(mondayStr, sundayStr);
+
+  let weekTotalSeconds = 0;
+  const gameStatsMap = new Map<string, { seconds: number; count: number; days: Set<string> }>();
+  const activeDaysSet = new Set<string>();
+
+  // Map 7 days from monday to sunday
+  const [y, m, d] = mondayStr.split('-').map(Number);
+  const dailySecondsMap = new Map<string, number>();
+  const daysList: Array<{ date: string; day_name: string; day_short: string; day_num: number }> = [];
+
+  for (let i = 0; i < 7; i++) {
+    const dayDate = new Date(y, m - 1, d + i);
+    const dateStr = formatDateStr(dayDate);
+    const dayIdx = dayDate.getDay(); // 0 is Sun, 1 is Mon...
+    dailySecondsMap.set(dateStr, 0);
+    daysList.push({
+      date: dateStr,
+      day_name: DAY_NAMES[dayIdx],
+      day_short: DAY_SHORT[dayIdx],
+      day_num: dayDate.getDate(),
+    });
+  }
+
+  for (const entry of weekEntries) {
+    weekTotalSeconds += entry.total_seconds;
+    activeDaysSet.add(entry.played_at);
+
+    // Day bucket
+    if (dailySecondsMap.has(entry.played_at)) {
+      dailySecondsMap.set(entry.played_at, (dailySecondsMap.get(entry.played_at) || 0) + entry.total_seconds);
+    }
+
+    // Game bucket
+    const curG = gameStatsMap.get(entry.game_id) || { seconds: 0, count: 0, days: new Set() };
+    curG.seconds += entry.total_seconds;
+    curG.count += 1;
+    curG.days.add(entry.played_at);
+    gameStatsMap.set(entry.game_id, curG);
+  }
+
+  // Games breakdown
+  const gamesStatsList: GamePeriodStat[] = Array.from(gameStatsMap.entries())
+    .map(([gameId, stat]) => {
+      const g = gamesMap.get(gameId);
+      const percent = weekTotalSeconds > 0 ? Math.round((stat.seconds / weekTotalSeconds) * 100) : 0;
+      return {
+        game_id: gameId,
+        name: g ? g.name : 'Juego desconocido',
+        cover_url: g?.cover_url || null,
+        status: g?.status || 'playing',
+        total_seconds: stat.seconds,
+        formatted_time: formatTime(stat.seconds),
+        formatted_short: formatTimeShort(stat.seconds),
+        entries_count: stat.count,
+        days_count: stat.days.size,
+        percentage: percent,
+      };
+    })
+    .sort((a, b) => b.total_seconds - a.total_seconds);
+
+  const maxDaySeconds = Math.max(1, ...Array.from(dailySecondsMap.values()));
+  const dailyDistribution = daysList.map((day) => {
+    const secs = dailySecondsMap.get(day.date) || 0;
+    return {
+      ...day,
+      seconds: secs,
+      formatted: formatTimeShort(secs),
+      percent: Math.round((secs / maxDaySeconds) * 100),
+    };
+  });
+
+  return {
+    id: key,
+    mondayStr,
+    sundayStr,
+    label,
+    isCurrent,
+    total_seconds: weekTotalSeconds,
+    formatted_time: formatTime(weekTotalSeconds),
+    formatted_short: formatTimeShort(weekTotalSeconds),
+    entries_count: weekEntries.length,
+    active_days_count: activeDaysSet.size,
+    games_count: gamesStatsList.length,
+    top_game: gamesStatsList[0] || null,
+    daily_distribution: dailyDistribution,
+    games: gamesStatsList,
+  };
+});
+
+// 3. MONTHS AGGREGATION
+interface MonthData {
+  id: string; // YYYY-MM
+  label: string;
+  isCurrent: boolean;
+  total_seconds: number;
+  formatted_time: string;
+  formatted_short: string;
+  entries_count: number;
+  active_days_count: number;
+  games_count: number;
+  top_game: GamePeriodStat | null;
+  daily_distribution: Array<{
+    date: string;
+    day_num: number;
+    day_short: string;
+    seconds: number;
+    formatted: string;
+    percent: number;
+  }>;
+  games: GamePeriodStat[];
+}
+
+const monthsMap = new Map<string, TimeEntry[]>();
+
+for (const entry of allEntries) {
+  if (!entry.played_at) continue;
+  const monthKey = entry.played_at.slice(0, 7);
+  if (!monthsMap.has(monthKey)) {
+    monthsMap.set(monthKey, []);
+  }
+  monthsMap.get(monthKey)!.push(entry);
+}
+
+// Ensure current month exists
+if (!monthsMap.has(currentMonthStr)) {
+  monthsMap.set(currentMonthStr, []);
+}
+
+const sortedMonthKeys = Array.from(monthsMap.keys()).sort().reverse();
+const monthsDataList: MonthData[] = sortedMonthKeys.map((monthKey) => {
+  const [yearStr, monthNumStr] = monthKey.split('-');
+  const y = Number(yearStr);
+  const m = Number(monthNumStr);
+  const isCurrent = monthKey === currentMonthStr;
+  const label = `${MONTH_NAMES[m - 1]} ${y}`;
+  const monthEntries = monthsMap.get(monthKey)!;
+
+  let monthTotalSeconds = 0;
+  const gameStatsMap = new Map<string, { seconds: number; count: number; days: Set<string> }>();
+  const activeDaysSet = new Set<string>();
+
+  // Days in month
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const dailySecondsMap = new Map<string, number>();
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayStr = `${monthKey}-${String(day).padStart(2, '0')}`;
+    dailySecondsMap.set(dayStr, 0);
+  }
+
+  for (const entry of monthEntries) {
+    monthTotalSeconds += entry.total_seconds;
+    activeDaysSet.add(entry.played_at);
+
+    if (dailySecondsMap.has(entry.played_at)) {
+      dailySecondsMap.set(entry.played_at, (dailySecondsMap.get(entry.played_at) || 0) + entry.total_seconds);
+    }
+
+    const curG = gameStatsMap.get(entry.game_id) || { seconds: 0, count: 0, days: new Set() };
+    curG.seconds += entry.total_seconds;
+    curG.count += 1;
+    curG.days.add(entry.played_at);
+    gameStatsMap.set(entry.game_id, curG);
+  }
+
+  const gamesStatsList: GamePeriodStat[] = Array.from(gameStatsMap.entries())
+    .map(([gameId, stat]) => {
+      const g = gamesMap.get(gameId);
+      const percent = monthTotalSeconds > 0 ? Math.round((stat.seconds / monthTotalSeconds) * 100) : 0;
+      return {
+        game_id: gameId,
+        name: g ? g.name : 'Juego desconocido',
+        cover_url: g?.cover_url || null,
+        status: g?.status || 'playing',
+        total_seconds: stat.seconds,
+        formatted_time: formatTime(stat.seconds),
+        formatted_short: formatTimeShort(stat.seconds),
+        entries_count: stat.count,
+        days_count: stat.days.size,
+        percentage: percent,
+      };
+    })
+    .sort((a, b) => b.total_seconds - a.total_seconds);
+
+  const maxDaySeconds = Math.max(1, ...Array.from(dailySecondsMap.values()));
+  const dailyDistribution: MonthData['daily_distribution'] = [];
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dayStr = `${monthKey}-${String(day).padStart(2, '0')}`;
+    const dObj = new Date(y, m - 1, day);
+    const secs = dailySecondsMap.get(dayStr) || 0;
+    dailyDistribution.push({
+      date: dayStr,
+      day_num: day,
+      day_short: DAY_SHORT[dObj.getDay()],
+      seconds: secs,
+      formatted: formatTimeShort(secs),
+      percent: Math.round((secs / maxDaySeconds) * 100),
+    });
+  }
+
+  return {
+    id: monthKey,
+    label,
+    isCurrent,
+    total_seconds: monthTotalSeconds,
+    formatted_time: formatTime(monthTotalSeconds),
+    formatted_short: formatTimeShort(monthTotalSeconds),
+    entries_count: monthEntries.length,
+    active_days_count: activeDaysSet.size,
+    games_count: gamesStatsList.length,
+    top_game: gamesStatsList[0] || null,
+    daily_distribution: dailyDistribution,
+    games: gamesStatsList,
+  };
+});
+
+// JSON payload for zero-reload client switching
+const statsPayload = {
+  weeks: weeksDataList,
+  months: monthsDataList,
+};
 ---
 
-<Layout title="Estadísticas">
+<Layout title="Estadísticas de Juego">
+  <!-- Page Header -->
   <div class="section-header-block animate-fade-in">
     <div class="section-title-wrap">
-      <h1 class="section-title-mark">Estadísticas de Juego</h1>
+      <h1 class="section-title-mark">Estadísticas e Histórico</h1>
     </div>
-    <p class="section-subtitle">Métricas de rendimiento, tiempos acumulados y récords de tus partidas</p>
+    <p class="section-subtitle">
+      Explora tus horas de juego por semana, mes e histórico global con desglose detallado por juego
+    </p>
   </div>
 
-  <!-- Highlights Banner -->
-  <div class="stats-overview-grid animate-slide-up">
-    <!-- Favorite / Most Played Game Card -->
-    {topGame ? (
-      <div class="stat-highlight-card">
-        <div class="highlight-badge">🏆 JUEGO MÁS JUGADO</div>
-        <div class="highlight-content">
-          {topGame.cover_url && (
-            <img src={topGame.cover_url} alt={topGame.name} class="highlight-cover" />
-          )}
-          <div class="highlight-info">
-            <h2 class="highlight-title">{topGame.name}</h2>
-            <div class="highlight-time">{formatTime(topGame.total_seconds)}</div>
-            <p class="highlight-meta">{topGame.entries_count} sesiones registradas</p>
-            <a href={`/games/${topGame.id}`} class="btn btn-secondary btn-sm" style="margin-top: 8px;">Ver detalles →</a>
-          </div>
+  <!-- Segmented View Tabs -->
+  <div class="stats-mode-tabs animate-slide-up">
+    <button class="mode-tab-btn active" data-mode="week" id="tab-btn-week">
+      <span class="tab-icon">📅</span>
+      <span class="tab-label">Vista Semanal</span>
+    </button>
+    <button class="mode-tab-btn" data-mode="month" id="tab-btn-month">
+      <span class="tab-icon">🗓️</span>
+      <span class="tab-label">Vista Mensual</span>
+    </button>
+    <button class="mode-tab-btn" data-mode="all" id="tab-btn-all">
+      <span class="tab-icon">🏆</span>
+      <span class="tab-label">Histórico Global</span>
+    </button>
+  </div>
+
+  <!-- PERIOD CONTAINER (Week / Month views) -->
+  <div id="period-view-wrapper" class="period-view-wrapper animate-slide-up">
+    <!-- Period Navigator Toolbar -->
+    <div class="period-nav-card card">
+      <div class="period-nav-left">
+        <button id="btn-period-prev" class="btn btn-secondary btn-sm" title="Período anterior">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+          <span class="btn-text">Anterior</span>
+        </button>
+
+        <div class="period-select-wrap">
+          <select id="period-select" class="period-dropdown" aria-label="Seleccionar período">
+            <!-- Populated via script based on active mode -->
+          </select>
+          <svg class="select-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </div>
+
+        <button id="btn-period-next" class="btn btn-secondary btn-sm" title="Período siguiente">
+          <span class="btn-text">Siguiente</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+      </div>
+
+      <div class="period-nav-right">
+        <button id="btn-period-current" class="btn btn-ghost btn-sm">
+          <span class="indicator-dot"></span>
+          <span id="current-period-btn-label">Ir a Semana Actual</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Active Period Summary Banner & Key Metrics -->
+    <div class="period-overview-grid">
+      <!-- Highlight Card (Top Game of Period or Period Total) -->
+      <div class="period-top-card" id="period-top-card">
+        <div class="top-card-badge" id="top-card-badge">🏆 DESTACADO DEL PERÍODO</div>
+        <div class="top-card-body" id="top-card-body">
+          <!-- Rendered dynamically -->
         </div>
       </div>
-    ) : null}
 
-    <!-- Quick Metrics Column -->
-    <div class="metrics-summary-box">
-      <div class="metric-mini-item">
-        <span class="mini-label">PROMEDIO POR SESIÓN</span>
-        <span class="mini-value">{avgSecondsPerSession > 0 ? formatTime(avgSecondsPerSession) : '0m'}</span>
-      </div>
-      <div class="metric-mini-item">
-        <span class="mini-label">SESIONES TOTALES</span>
-        <span class="mini-value">{totalSessions}</span>
-      </div>
-      <div class="metric-mini-item">
-        <span class="mini-label">JUEGOS COMPLETADOS</span>
-        <span class="mini-value">{completedCount}</span>
-      </div>
-      <div class="metric-mini-item">
-        <span class="mini-label">JUGANDO ACTIVAMENTE</span>
-        <span class="mini-value">{playingCount}</span>
+      <!-- Quick Period Metrics Grid -->
+      <div class="period-metrics-grid">
+        <div class="metric-mini-item">
+          <span class="mini-label">TIEMPO TOTAL</span>
+          <span class="mini-value accent-text" id="metric-total-time">0h 00m</span>
+          <span class="mini-subtext" id="metric-period-label">En este período</span>
+        </div>
+        <div class="metric-mini-item">
+          <span class="mini-label">JUEGOS ACTIVOS</span>
+          <span class="mini-value" id="metric-games-count">0</span>
+          <span class="mini-subtext">Con tiempo registrado</span>
+        </div>
+        <div class="metric-mini-item">
+          <span class="mini-label">SESIONES</span>
+          <span class="mini-value" id="metric-sessions-count">0</span>
+          <span class="mini-subtext">Partidas jugadas</span>
+        </div>
+        <div class="metric-mini-item">
+          <span class="mini-label">DÍAS ACTIVOS</span>
+          <span class="mini-value" id="metric-days-count">0</span>
+          <span class="mini-subtext" id="metric-days-subtext">Días con juego</span>
+        </div>
       </div>
     </div>
+
+    <!-- Distribution Chart Section -->
+    <section class="section distribution-section">
+      <div class="section-header-block">
+        <div class="section-title-wrap">
+          <h2 class="section-title-mark" id="dist-section-title">Distribución de Actividad Diaria</h2>
+        </div>
+        <p class="section-subtitle" id="dist-section-subtitle">Horas registradas cada día en el período seleccionado</p>
+      </div>
+
+      <div class="chart-card card">
+        <div id="chart-bars-container" class="chart-bars-container">
+          <!-- Rendered dynamically -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Games Breakdown Section (Core User Requirement) -->
+    <section class="section games-breakdown-section">
+      <div class="section-header-block">
+        <div class="section-title-wrap">
+          <h2 class="section-title-mark" id="breakdown-section-title">Horas Jugadas por Juego</h2>
+          <span class="count-pill" id="breakdown-games-pill">0 juegos</span>
+        </div>
+        <p class="section-subtitle">
+          Tiempo acumulado, porcentaje de dedicación y sesiones de cada juego en el período seleccionado
+        </p>
+      </div>
+
+      <!-- Games List Container -->
+      <div id="games-breakdown-list" class="games-breakdown-list">
+        <!-- Rendered dynamically -->
+      </div>
+    </section>
   </div>
 
-  <!-- Playtime Ranking Bars -->
-  <section class="section animate-slide-up" style="margin-top: var(--space-2xl);">
-    <div class="section-header-block">
-      <div class="section-title-wrap">
-        <h2 class="section-title-mark">Ranking por Tiempo Dedicado</h2>
+  <!-- ALL TIME VIEW (Tab 3: Global) -->
+  <div id="all-time-view-wrapper" class="all-time-view-wrapper" style="display: none;">
+    <!-- Highlights Banner -->
+    <div class="stats-overview-grid animate-slide-up">
+      {topGame ? (
+        <div class="stat-highlight-card">
+          <div class="highlight-badge">🏆 JUEGO MÁS JUGADO DE SIEMPRE</div>
+          <div class="highlight-content">
+            {topGame.cover_url ? (
+              <img src={topGame.cover_url} alt={topGame.name} class="highlight-cover" />
+            ) : (
+              <div class="highlight-placeholder">🎮</div>
+            )}
+            <div class="highlight-info">
+              <h2 class="highlight-title">{topGame.name}</h2>
+              <div class="highlight-time">{formatTime(topGame.total_seconds)}</div>
+              <p class="highlight-meta">{topGame.entries_count} sesiones registradas en total</p>
+              <a href={`/games/${topGame.id}`} class="btn btn-secondary btn-sm" style="margin-top: 8px;">Ver detalles →</a>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <!-- Quick Metrics Column -->
+      <div class="metrics-summary-box">
+        <div class="metric-mini-item">
+          <span class="mini-label">TIEMPO TOTAL HISTÓRICO</span>
+          <span class="mini-value accent-text">{formatTimeShort(totalSeconds)}</span>
+        </div>
+        <div class="metric-mini-item">
+          <span class="mini-label">PROMEDIO POR SESIÓN</span>
+          <span class="mini-value">{avgSecondsPerSession > 0 ? formatTimeShort(avgSecondsPerSession) : '0m'}</span>
+        </div>
+        <div class="metric-mini-item">
+          <span class="mini-label">SESIONES TOTALES</span>
+          <span class="mini-value">{totalSessions}</span>
+        </div>
+        <div class="metric-mini-item">
+          <span class="mini-label">JUEGOS REGISTRADOS</span>
+          <span class="mini-value">{allGames.length}</span>
+        </div>
       </div>
     </div>
 
-    <div class="ranking-card card">
-      {gamesWithStats.map((game, index) => {
-        const percent = Math.max(4, Math.round((game.total_seconds / (maxPlaytime || 1)) * 100));
-        return (
-          <div class="ranking-row">
-            <div class="ranking-index">#{index + 1}</div>
-            <div class="ranking-art">
-              {game.cover_url ? (
-                <img src={game.cover_url} alt={game.name} class="ranking-thumb" />
-              ) : (
-                <div class="ranking-placeholder">🎮</div>
-              )}
+    <!-- Playtime Ranking Bars (All Time) -->
+    <section class="section animate-slide-up" style="margin-top: var(--space-2xl);">
+      <div class="section-header-block">
+        <div class="section-title-wrap">
+          <h2 class="section-title-mark">Ranking Histórico Completo</h2>
+        </div>
+        <p class="section-subtitle">Tiempo acumulado de toda tu historia de juego por título</p>
+      </div>
+
+      <div class="ranking-card card">
+        {gamesWithStats.map((game, index) => {
+          const percent = Math.max(4, Math.round((game.total_seconds / (maxPlaytime || 1)) * 100));
+          return (
+            <div class="ranking-row">
+              <div class="ranking-index">#{index + 1}</div>
+              <div class="ranking-art">
+                {game.cover_url ? (
+                  <img src={game.cover_url} alt={game.name} class="ranking-thumb" />
+                ) : (
+                  <div class="ranking-placeholder">🎮</div>
+                )}
+              </div>
+              <div class="ranking-details">
+                <div class="ranking-header">
+                  <a href={`/games/${game.id}`} class="ranking-name">{game.name}</a>
+                  <span class="ranking-time">{formatTime(game.total_seconds)}</span>
+                </div>
+                <div class="ranking-bar-bg">
+                  <div class="ranking-bar-fill" style={`width: ${percent}%;`}></div>
+                </div>
+                <div class="ranking-footer">
+                  <span>{game.entries_count} sesiones</span>
+                  <span>{percent}% del máximo</span>
+                </div>
+              </div>
             </div>
-            <div class="ranking-details">
-              <div class="ranking-header">
-                <a href={`/games/${game.id}`} class="ranking-name">{game.name}</a>
-                <span class="ranking-time">{formatTime(game.total_seconds)}</span>
+          );
+        })}
+      </div>
+    </section>
+  </div>
+
+  <!-- Raw Payload embedded for client reactivity -->
+  <script id="stats-data" type="application/json" set:html={JSON.stringify(statsPayload)} />
+</Layout>
+
+<script>
+  // Client script to manage dynamic period selection and instant rendering
+  interface GameStat {
+    game_id: string;
+    name: string;
+    cover_url: string | null;
+    status: string;
+    total_seconds: number;
+    formatted_time: string;
+    formatted_short: string;
+    entries_count: number;
+    days_count: number;
+    percentage: number;
+  }
+
+  interface DayStat {
+    date: string;
+    day_name?: string;
+    day_short: string;
+    day_num: number;
+    seconds: number;
+    formatted: string;
+    percent: number;
+  }
+
+  interface PeriodRecord {
+    id: string;
+    label: string;
+    isCurrent: boolean;
+    total_seconds: number;
+    formatted_time: string;
+    formatted_short: string;
+    entries_count: number;
+    active_days_count: number;
+    games_count: number;
+    top_game: GameStat | null;
+    daily_distribution: DayStat[];
+    games: GameStat[];
+  }
+
+  interface Payload {
+    weeks: PeriodRecord[];
+    months: PeriodRecord[];
+  }
+
+  const rawDataEl = document.getElementById('stats-data');
+  if (rawDataEl) {
+    const data: Payload = JSON.parse(rawDataEl.textContent || '{}');
+
+    // UI elements
+    const tabBtnWeek = document.getElementById('tab-btn-week') as HTMLButtonElement;
+    const tabBtnMonth = document.getElementById('tab-btn-month') as HTMLButtonElement;
+    const tabBtnAll = document.getElementById('tab-btn-all') as HTMLButtonElement;
+    const periodViewWrapper = document.getElementById('period-view-wrapper') as HTMLElement;
+    const allTimeViewWrapper = document.getElementById('all-time-view-wrapper') as HTMLElement;
+
+    const periodSelect = document.getElementById('period-select') as HTMLSelectElement;
+    const btnPrev = document.getElementById('btn-period-prev') as HTMLButtonElement;
+    const btnNext = document.getElementById('btn-period-next') as HTMLButtonElement;
+    const btnCurrent = document.getElementById('btn-period-current') as HTMLButtonElement;
+    const currentBtnLabel = document.getElementById('current-period-btn-label') as HTMLElement;
+
+    // Metrics elements
+    const metricTotalTime = document.getElementById('metric-total-time') as HTMLElement;
+    const metricPeriodLabel = document.getElementById('metric-period-label') as HTMLElement;
+    const metricGamesCount = document.getElementById('metric-games-count') as HTMLElement;
+    const metricSessionsCount = document.getElementById('metric-sessions-count') as HTMLElement;
+    const metricDaysCount = document.getElementById('metric-days-count') as HTMLElement;
+    const metricDaysSubtext = document.getElementById('metric-days-subtext') as HTMLElement;
+
+    const periodTopCard = document.getElementById('period-top-card') as HTMLElement;
+    const topCardBadge = document.getElementById('top-card-badge') as HTMLElement;
+    const topCardBody = document.getElementById('top-card-body') as HTMLElement;
+
+    // Chart elements
+    const distTitle = document.getElementById('dist-section-title') as HTMLElement;
+    const distSubtitle = document.getElementById('dist-section-subtitle') as HTMLElement;
+    const chartBarsContainer = document.getElementById('chart-bars-container') as HTMLElement;
+
+    // Breakdown elements
+    const breakdownTitle = document.getElementById('breakdown-section-title') as HTMLElement;
+    const breakdownPill = document.getElementById('breakdown-games-pill') as HTMLElement;
+    const gamesListContainer = document.getElementById('games-breakdown-list') as HTMLElement;
+
+    let currentMode: 'week' | 'month' | 'all' = 'week';
+    let selectedWeekId = data.weeks.length > 0 ? data.weeks[0].id : '';
+    let selectedMonthId = data.months.length > 0 ? data.months[0].id : '';
+
+    // Status label map
+    const STATUS_MAP: Record<string, { label: string; class: string }> = {
+      playing: { label: 'Jugando', class: 'status-playing' },
+      completed: { label: 'Completado', class: 'status-completed' },
+      paused: { label: 'Pausado', class: 'status-paused' },
+      dropped: { label: 'Abandonado', class: 'status-dropped' },
+    };
+
+    function updatePeriodDropdown() {
+      periodSelect.innerHTML = '';
+      const list = currentMode === 'week' ? data.weeks : data.months;
+      const activeId = currentMode === 'week' ? selectedWeekId : selectedMonthId;
+
+      list.forEach((item, index) => {
+        const opt = document.createElement('option');
+        opt.value = item.id;
+        const currentTag = item.isCurrent ? (currentMode === 'week' ? ' (Semana actual)' : ' (Mes actual)') : '';
+        const timeTag = item.total_seconds > 0 ? ` — ${item.formatted_short}` : ' — 0m';
+        opt.textContent = `${item.label}${currentTag}${timeTag}`;
+        if (item.id === activeId) {
+          opt.selected = true;
+        }
+        periodSelect.appendChild(opt);
+      });
+
+      updateNavButtonsState();
+    }
+
+    function updateNavButtonsState() {
+      const list = currentMode === 'week' ? data.weeks : data.months;
+      const activeId = currentMode === 'week' ? selectedWeekId : selectedMonthId;
+      const currentIndex = list.findIndex((item) => item.id === activeId);
+
+      // List is ordered most recent first: index 0 is newest, index N-1 is oldest
+      // "Anterior" means going further back in time (index + 1)
+      // "Siguiente" means going towards newer time (index - 1)
+      btnPrev.disabled = currentIndex >= list.length - 1;
+      btnNext.disabled = currentIndex <= 0;
+
+      // Update current button text
+      if (currentMode === 'week') {
+        currentBtnLabel.textContent = 'Ir a Semana Actual';
+        btnCurrent.style.display = activeId === (data.weeks[0]?.id || '') ? 'none' : 'inline-flex';
+      } else {
+        currentBtnLabel.textContent = 'Ir a Mes Actual';
+        btnCurrent.style.display = activeId === (data.months[0]?.id || '') ? 'none' : 'inline-flex';
+      }
+    }
+
+    function renderActivePeriod() {
+      if (currentMode === 'all') return;
+
+      const list = currentMode === 'week' ? data.weeks : data.months;
+      const activeId = currentMode === 'week' ? selectedWeekId : selectedMonthId;
+      const period = list.find((item) => item.id === activeId) || list[0];
+
+      if (!period) return;
+
+      // 1. Metric values
+      metricTotalTime.textContent = period.formatted_time || '0m';
+      metricPeriodLabel.textContent = currentMode === 'week' ? 'En esta semana' : 'En este mes';
+      metricGamesCount.textContent = period.games_count.toString();
+      metricSessionsCount.textContent = period.entries_count.toString();
+      metricDaysCount.textContent = period.active_days_count.toString();
+      metricDaysSubtext.textContent = currentMode === 'week' ? 'de 7 días jugados' : 'días con partidas';
+
+      // 2. Highlight Card
+      if (period.top_game) {
+        topCardBadge.textContent = currentMode === 'week' ? '🏆 JUEGO MÁS JUGADO DE LA SEMANA' : '🏆 JUEGO MÁS JUGADO DEL MES';
+        const topG = period.top_game;
+        topCardBody.innerHTML = `
+          <div class="top-game-art-wrap">
+            ${topG.cover_url
+              ? `<img src="${topG.cover_url}" alt="${topG.name}" class="top-game-cover" />`
+              : `<div class="top-game-placeholder">🎮</div>`
+            }
+          </div>
+          <div class="top-game-info">
+            <h3 class="top-game-title">${topG.name}</h3>
+            <div class="top-game-time">${topG.formatted_time}</div>
+            <div class="top-game-meta">
+              <span><strong>${topG.percentage}%</strong> del tiempo total</span>
+              <span>•</span>
+              <span><strong>${topG.entries_count}</strong> sesiones</span>
+            </div>
+            <a href="/games/${topG.game_id}" class="btn btn-secondary btn-xs top-game-link">Ver detalles →</a>
+          </div>
+        `;
+      } else {
+        topCardBadge.textContent = currentMode === 'week' ? '📅 RESUMEN SEMANAL' : '🗓️ RESUMEN MENSUAL';
+        topCardBody.innerHTML = `
+          <div class="top-card-empty">
+            <span class="empty-icon">🎮</span>
+            <div>
+              <h3 class="top-game-title">Sin actividad registrada</h3>
+              <p class="top-game-meta">No hay partidas registradas para ${period.label}</p>
+            </div>
+          </div>
+        `;
+      }
+
+      // 3. Distribution Chart
+      if (currentMode === 'week') {
+        distTitle.textContent = `Distribución Diaria (${period.label})`;
+        distSubtitle.textContent = 'Horas dedicadas cada día de lunes a domingo';
+      } else {
+        distTitle.textContent = `Actividad del Mes (${period.label})`;
+        distSubtitle.textContent = 'Horas jugadas a lo largo de los días del mes';
+      }
+
+      renderDistributionChart(period.daily_distribution, currentMode);
+
+      // 4. Games Breakdown List
+      breakdownTitle.textContent = currentMode === 'week' ? 'Juegos Jugados en la Semana' : 'Juegos Jugados en el Mes';
+      breakdownPill.textContent = `${period.games.length} ${period.games.length === 1 ? 'juego' : 'juegos'}`;
+
+      renderGamesBreakdown(period.games, period.total_seconds);
+      updateNavButtonsState();
+    }
+
+    function renderDistributionChart(days: DayStat[], mode: 'week' | 'month') {
+      chartBarsContainer.innerHTML = '';
+      if (!days || days.length === 0) {
+        chartBarsContainer.innerHTML = '<div class="chart-empty">Sin datos de actividad</div>';
+        return;
+      }
+
+      const isMonthly = mode === 'month';
+      const containerClass = isMonthly ? 'chart-grid-month' : 'chart-grid-week';
+      chartBarsContainer.className = `chart-bars-container ${containerClass}`;
+
+      days.forEach((day) => {
+        const barItem = document.createElement('div');
+        barItem.className = `chart-bar-item ${day.seconds > 0 ? 'has-play' : 'is-idle'}`;
+
+        const heightPercent = Math.max(day.percent, day.seconds > 0 ? 8 : 2);
+
+        barItem.innerHTML = `
+          <div class="chart-bar-track" title="${day.date}: ${day.formatted}">
+            <div class="chart-bar-fill" style="height: ${heightPercent}%;"></div>
+            ${day.seconds > 0 ? `<div class="chart-bar-tooltip">${day.formatted}</div>` : ''}
+          </div>
+          <div class="chart-bar-label">
+            <span class="label-day">${day.day_short}</span>
+            <span class="label-num">${day.day_num}</span>
+          </div>
+        `;
+
+        chartBarsContainer.appendChild(barItem);
+      });
+    }
+
+    function renderGamesBreakdown(games: GameStat[], totalPeriodSeconds: number) {
+      gamesListContainer.innerHTML = '';
+
+      if (!games || games.length === 0) {
+        gamesListContainer.innerHTML = `
+          <div class="empty-breakdown-card card">
+            <div class="empty-icon">🎮</div>
+            <h3>No hay partidas registradas en este período</h3>
+            <p>Selecciona otra semana o mes desde el selector para ver tu histórico de horas de juego.</p>
+          </div>
+        `;
+        return;
+      }
+
+      games.forEach((game, index) => {
+        const statusInfo = STATUS_MAP[game.status] || { label: 'Jugando', class: 'status-playing' };
+        const percentOfMax = games[0] ? Math.max(6, Math.round((game.total_seconds / games[0].total_seconds) * 100)) : 100;
+
+        const row = document.createElement('div');
+        row.className = 'game-stat-card card';
+
+        row.innerHTML = `
+          <div class="game-stat-left">
+            <div class="game-stat-rank">#${index + 1}</div>
+            <a href="/games/${game.game_id}" class="game-stat-thumb-wrap">
+              ${game.cover_url
+                ? `<img src="${game.cover_url}" alt="${game.name}" class="game-stat-thumb" />`
+                : `<div class="game-stat-placeholder">🎮</div>`
+              }
+            </a>
+            <div class="game-stat-info">
+              <div class="game-stat-title-row">
+                <a href="/games/${game.game_id}" class="game-stat-title">${game.name}</a>
+                <span class="status-badge ${statusInfo.class}">${statusInfo.label}</span>
               </div>
-              <div class="ranking-bar-bg">
-                <div class="ranking-bar-fill" style={`width: ${percent}%;`}></div>
-              </div>
-              <div class="ranking-footer">
-                <span>{game.entries_count} sesiones</span>
-                <span>{percent}% del máximo</span>
+              <div class="game-stat-meta-tags">
+                <span class="meta-tag">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                  ${game.entries_count} ${game.entries_count === 1 ? 'sesión' : 'sesiones'}
+                </span>
+                <span class="meta-tag">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                    <line x1="16" y1="2" x2="16" y2="6"></line>
+                    <line x1="8" y1="2" x2="8" y2="6"></line>
+                    <line x1="3" y1="10" x2="18" y2="10"></line>
+                  </svg>
+                  ${game.days_count} ${game.days_count === 1 ? 'día activo' : 'días activos'}
+                </span>
               </div>
             </div>
           </div>
-        );
-      })}
-    </div>
-  </section>
-</Layout>
+
+          <div class="game-stat-right">
+            <div class="game-stat-time-wrap">
+              <span class="game-stat-time">${game.formatted_time}</span>
+              <span class="game-stat-share">${game.percentage}% del período</span>
+            </div>
+            <div class="game-stat-bar-track">
+              <div class="game-stat-bar-fill" style="width: ${percentOfMax}%;"></div>
+            </div>
+          </div>
+        `;
+
+        gamesListContainer.appendChild(row);
+      });
+    }
+
+    function setMode(mode: 'week' | 'month' | 'all') {
+      currentMode = mode;
+
+      tabBtnWeek.classList.toggle('active', mode === 'week');
+      tabBtnMonth.classList.toggle('active', mode === 'month');
+      tabBtnAll.classList.toggle('active', mode === 'all');
+
+      if (mode === 'all') {
+        periodViewWrapper.style.display = 'none';
+        allTimeViewWrapper.style.display = 'block';
+      } else {
+        periodViewWrapper.style.display = 'block';
+        allTimeViewWrapper.style.display = 'none';
+        updatePeriodDropdown();
+        renderActivePeriod();
+      }
+    }
+
+    // Tab Listeners
+    tabBtnWeek.addEventListener('click', () => setMode('week'));
+    tabBtnMonth.addEventListener('click', () => setMode('month'));
+    tabBtnAll.addEventListener('click', () => setMode('all'));
+
+    // Period Select Listener
+    periodSelect.addEventListener('change', (e) => {
+      const val = (e.target as HTMLSelectElement).value;
+      if (currentMode === 'week') {
+        selectedWeekId = val;
+      } else {
+        selectedMonthId = val;
+      }
+      renderActivePeriod();
+    });
+
+    // Nav Arrows
+    btnPrev.addEventListener('click', () => {
+      const list = currentMode === 'week' ? data.weeks : data.months;
+      const activeId = currentMode === 'week' ? selectedWeekId : selectedMonthId;
+      const currentIndex = list.findIndex((item) => item.id === activeId);
+      if (currentIndex < list.length - 1) {
+        const nextPeriod = list[currentIndex + 1];
+        if (currentMode === 'week') {
+          selectedWeekId = nextPeriod.id;
+        } else {
+          selectedMonthId = nextPeriod.id;
+        }
+        periodSelect.value = nextPeriod.id;
+        renderActivePeriod();
+      }
+    });
+
+    btnNext.addEventListener('click', () => {
+      const list = currentMode === 'week' ? data.weeks : data.months;
+      const activeId = currentMode === 'week' ? selectedWeekId : selectedMonthId;
+      const currentIndex = list.findIndex((item) => item.id === activeId);
+      if (currentIndex > 0) {
+        const prevPeriod = list[currentIndex - 1];
+        if (currentMode === 'week') {
+          selectedWeekId = prevPeriod.id;
+        } else {
+          selectedMonthId = prevPeriod.id;
+        }
+        periodSelect.value = prevPeriod.id;
+        renderActivePeriod();
+      }
+    });
+
+    // Return to current period button
+    btnCurrent.addEventListener('click', () => {
+      if (currentMode === 'week' && data.weeks.length > 0) {
+        selectedWeekId = data.weeks[0].id;
+        periodSelect.value = selectedWeekId;
+        renderActivePeriod();
+      } else if (currentMode === 'month' && data.months.length > 0) {
+        selectedMonthId = data.months[0].id;
+        periodSelect.value = selectedMonthId;
+        renderActivePeriod();
+      }
+    });
+
+    // Initial render
+    updatePeriodDropdown();
+    renderActivePeriod();
+  }
+</script>
 
 <style>
+  /* Tabs Navigation */
+  .stats-mode-tabs {
+    display: flex;
+    gap: var(--space-sm);
+    background: #0f1017;
+    padding: 6px;
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: var(--space-lg);
+    width: fit-content;
+  }
+
+  .mode-tab-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 10px 20px;
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    font-family: var(--font-body);
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+  }
+
+  .mode-tab-btn:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .mode-tab-btn.active {
+    background: linear-gradient(135deg, rgba(229, 57, 53, 0.25) 0%, rgba(229, 57, 53, 0.08) 100%);
+    color: #ffffff;
+    border: 1px solid rgba(229, 57, 53, 0.4);
+    box-shadow: 0 0 16px rgba(229, 57, 53, 0.2);
+  }
+
+  .tab-icon {
+    font-size: 1.125rem;
+  }
+
+  /* Period View Wrapper */
+  .period-view-wrapper {
+    margin-top: var(--space-lg);
+  }
+
+  /* Period Navigator Bar */
+  .period-nav-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md) var(--space-lg);
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: #11131c;
+    flex-wrap: wrap;
+  }
+
+  .period-nav-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+  }
+
+  .period-select-wrap {
+    position: relative;
+    display: inline-block;
+  }
+
+  .period-dropdown {
+    appearance: none;
+    background: #181a26;
+    color: #ffffff;
+    font-family: var(--font-body);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    padding: 8px 36px 8px 16px;
+    border: 1px solid rgba(229, 57, 53, 0.35);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    outline: none;
+    transition: all var(--transition-fast);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  }
+
+  .period-dropdown:hover,
+  .period-dropdown:focus {
+    border-color: var(--color-accent);
+    box-shadow: 0 0 12px rgba(229, 57, 53, 0.25);
+  }
+
+  .select-chevron {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+    color: var(--color-text-secondary);
+  }
+
+  .period-nav-right {
+    display: flex;
+    align-items: center;
+  }
+
+  .indicator-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #00e676;
+    margin-right: 6px;
+    box-shadow: 0 0 8px #00e676;
+    display: inline-block;
+  }
+
+  /* Period Overview Grid */
+  .period-overview-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: var(--space-lg);
+    margin-bottom: var(--space-xl);
+  }
+
+  @media (max-width: 900px) {
+    .period-overview-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  /* Period Highlight Card */
+  .period-top-card {
+    background: linear-gradient(135deg, #181924 0%, #0e1017 100%);
+    border: 1px solid rgba(229, 57, 53, 0.4);
+    border-radius: var(--radius-lg);
+    padding: var(--space-lg);
+    box-shadow: 0 0 25px rgba(229, 57, 53, 0.15);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  .top-card-badge {
+    display: inline-block;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    color: #ff3344;
+    background: rgba(229, 57, 53, 0.15);
+    padding: 3px 8px;
+    border-radius: 4px;
+    margin-bottom: var(--space-md);
+    width: fit-content;
+  }
+
+  .top-card-body {
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
+  }
+
+  .top-game-art-wrap {
+    flex-shrink: 0;
+  }
+
+  .top-game-cover {
+    width: 85px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 8px 16px rgba(0,0,0,0.5);
+  }
+
+  .top-game-placeholder {
+    width: 85px;
+    height: 120px;
+    background: #1c1e28;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .top-game-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .top-game-title {
+    font-family: var(--font-display);
+    font-size: 1.375rem;
+    font-weight: 800;
+    color: #ffffff;
+    margin-bottom: 4px;
+  }
+
+  .top-game-time {
+    font-family: var(--font-display);
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: var(--color-accent);
+    margin-bottom: 6px;
+  }
+
+  .top-game-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8125rem;
+    color: var(--color-text-muted);
+    margin-bottom: 12px;
+  }
+
+  .top-card-empty {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md) 0;
+  }
+
+  .top-card-empty .empty-icon {
+    font-size: 2.5rem;
+  }
+
+  /* Mini Metrics Grid */
+  .period-metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+  }
+
+  .metric-mini-item {
+    background: #0d0f16;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .mini-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: #8b8c9e;
+    letter-spacing: 0.06em;
+    margin-bottom: 4px;
+  }
+
+  .mini-value {
+    font-family: var(--font-display);
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #ffffff;
+  }
+
+  .mini-value.accent-text {
+    color: var(--color-accent);
+  }
+
+  .mini-subtext {
+    font-size: 0.6875rem;
+    color: var(--color-text-muted);
+    margin-top: 2px;
+  }
+
+  /* Distribution Chart */
+  .chart-card {
+    padding: var(--space-xl) var(--space-lg) var(--space-md);
+    background: #11131c;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .chart-bars-container {
+    display: flex;
+    align-items: flex-end;
+    height: 160px;
+    gap: var(--space-md);
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .chart-grid-month {
+    gap: 4px;
+  }
+
+  .chart-bar-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+    position: relative;
+  }
+
+  .chart-bar-track {
+    flex: 1;
+    width: 100%;
+    max-width: 38px;
+    display: flex;
+    align-items: flex-end;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .chart-grid-month .chart-bar-track {
+    max-width: 18px;
+  }
+
+  .chart-bar-fill {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 4px 4px 0 0;
+    transition: all var(--transition-fast);
+  }
+
+  .chart-bar-item.has-play .chart-bar-fill {
+    background: linear-gradient(180deg, #ff3344 0%, #e53935 100%);
+    box-shadow: 0 0 10px rgba(229, 57, 53, 0.4);
+  }
+
+  .chart-bar-item:hover .chart-bar-fill {
+    background: #ff4d5a;
+    box-shadow: 0 0 16px rgba(229, 57, 53, 0.7);
+  }
+
+  .chart-bar-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-6px);
+    background: #1e202e;
+    color: #ffffff;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--transition-fast);
+    z-index: 10;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  }
+
+  .chart-bar-item:hover .chart-bar-tooltip {
+    opacity: 1;
+  }
+
+  .chart-bar-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-top: 8px;
+  }
+
+  .label-day {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--color-text-secondary);
+  }
+
+  .label-num {
+    font-size: 0.625rem;
+    color: var(--color-text-muted);
+  }
+
+  .chart-grid-month .chart-bar-label .label-day {
+    display: none;
+  }
+
+  .chart-empty {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+  }
+
+  /* Games Breakdown List */
+  .count-pill {
+    font-size: 0.75rem;
+    font-weight: 700;
+    background: rgba(229, 57, 53, 0.15);
+    color: #ff3344;
+    padding: 3px 10px;
+    border-radius: var(--radius-full);
+    border: 1px solid rgba(229, 57, 53, 0.3);
+  }
+
+  .games-breakdown-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    margin-top: var(--space-md);
+  }
+
+  .game-stat-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-md) var(--space-lg);
+    background: #13151f;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-lg);
+    transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+    gap: var(--space-lg);
+  }
+
+  .game-stat-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(229, 57, 53, 0.35);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4), 0 0 15px rgba(229, 57, 53, 0.1);
+  }
+
+  .game-stat-left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex: 1;
+    min-width: 0;
+  }
+
+  .game-stat-rank {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 800;
+    color: #6b6b80;
+    width: 28px;
+    flex-shrink: 0;
+  }
+
+  .game-stat-thumb-wrap {
+    flex-shrink: 0;
+  }
+
+  .game-stat-thumb {
+    width: 48px;
+    height: 64px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .game-stat-placeholder {
+    width: 48px;
+    height: 64px;
+    background: #1c1e28;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    font-size: 1.25rem;
+  }
+
+  .game-stat-info {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .game-stat-title-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+  }
+
+  .game-stat-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #ffffff;
+    text-decoration: none;
+    transition: color var(--transition-fast);
+  }
+
+  .game-stat-title:hover {
+    color: var(--color-accent);
+  }
+
+  .status-badge {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .status-playing {
+    background: rgba(229, 57, 53, 0.15);
+    color: #ff3344;
+    border: 1px solid rgba(229, 57, 53, 0.3);
+  }
+
+  .status-completed {
+    background: rgba(0, 230, 118, 0.15);
+    color: #00e676;
+    border: 1px solid rgba(0, 230, 118, 0.3);
+  }
+
+  .status-paused {
+    background: rgba(255, 215, 64, 0.15);
+    color: #ffd740;
+    border: 1px solid rgba(255, 215, 64, 0.3);
+  }
+
+  .status-dropped {
+    background: rgba(107, 107, 128, 0.15);
+    color: #8b8c9e;
+    border: 1px solid rgba(107, 107, 128, 0.3);
+  }
+
+  .game-stat-meta-tags {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+  }
+
+  .meta-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .game-stat-right {
+    width: 260px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  @media (max-width: 768px) {
+    .game-stat-card {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .game-stat-right {
+      width: 100%;
+    }
+  }
+
+  .game-stat-time-wrap {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .game-stat-time {
+    font-family: var(--font-display);
+    font-size: 1.125rem;
+    font-weight: 800;
+    color: var(--color-accent);
+  }
+
+  .game-stat-share {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+
+  .game-stat-bar-track {
+    height: 7px;
+    background: rgba(255, 255, 255, 0.07);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .game-stat-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #e53935 0%, #ff3344 100%);
+    border-radius: 4px;
+    box-shadow: 0 0 8px rgba(229, 57, 53, 0.5);
+  }
+
+  .empty-breakdown-card {
+    text-align: center;
+    padding: var(--space-2xl) var(--space-lg);
+    background: #11131c;
+    border: 1px dashed rgba(255, 255, 255, 0.12);
+  }
+
+  .empty-breakdown-card .empty-icon {
+    font-size: 3rem;
+    margin-bottom: var(--space-md);
+  }
+
+  .empty-breakdown-card h3 {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 6px;
+  }
+
+  .empty-breakdown-card p {
+    font-size: 0.875rem;
+    color: var(--color-text-muted);
+  }
+
+  /* All Time View Styles (preserved) */
   .stats-overview-grid {
     display: grid;
     grid-template-columns: 2fr 1fr;
@@ -181,6 +1667,18 @@ const maxPlaytime = topGame ? topGame.total_seconds : 1;
     flex-shrink: 0;
   }
 
+  .highlight-placeholder {
+    width: 100px;
+    height: 140px;
+    background: #1c1e28;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.5rem;
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+  }
+
   .highlight-title {
     font-family: var(--font-display);
     font-size: 1.5rem;
@@ -208,32 +1706,6 @@ const maxPlaytime = topGame ? topGame.total_seconds : 1;
     gap: var(--space-md);
   }
 
-  .metric-mini-item {
-    background: #0d0f16;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: var(--radius-md);
-    padding: var(--space-md);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
-
-  .mini-label {
-    font-size: 0.6875rem;
-    font-weight: 700;
-    color: #8b8c9e;
-    letter-spacing: 0.06em;
-    margin-bottom: 6px;
-  }
-
-  .mini-value {
-    font-family: var(--font-display);
-    font-size: 1.25rem;
-    font-weight: 800;
-    color: #ffffff;
-  }
-
-  /* Ranking rows */
   .ranking-card {
     padding: var(--space-lg);
     display: flex;
