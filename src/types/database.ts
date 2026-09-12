@@ -69,3 +69,31 @@ export const STATUS_COLORS: Record<Game['status'], string> = {
   paused: 'var(--color-warning)',
   dropped: 'var(--color-muted)',
 };
+
+export function getLocalDateStr(d: Date = new Date(), timeZone?: string): string {
+  let tz = timeZone;
+  if (!tz) {
+    if (typeof process !== 'undefined' && process.env?.APP_TIMEZONE) {
+      tz = process.env.APP_TIMEZONE;
+    } else if (typeof window !== 'undefined' && typeof Intl !== 'undefined') {
+      tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Bogota';
+    } else {
+      tz = 'America/Bogota';
+    }
+  }
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    return formatter.format(d);
+  } catch {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+}

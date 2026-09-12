@@ -1,7 +1,7 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import { supabase } from '../lib/supabase';
-import { formatTime, formatTimeShort, STATUS_LABELS } from '../types/database';
+import { formatTime, formatTimeShort, STATUS_LABELS, getLocalDateStr } from '../types/database';
 import type { Game, TimeEntry, GameWithStats } from '../types/database';
 
 // Fetch games & entries
@@ -23,10 +23,7 @@ const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Vierne
 const DAY_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 function formatDateStr(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return getLocalDateStr(d);
 }
 
 function getWeekRange(dateStr: string) {
@@ -123,6 +120,7 @@ interface WeekData {
     day_name: string;
     day_short: string;
     day_num: number;
+    day_of_week: number;
     seconds: number;
     formatted: string;
     percent: number;
@@ -163,7 +161,7 @@ const weeksDataList: WeekData[] = sortedWeekKeys.map((key) => {
 
   const [y, m, d] = mondayStr.split('-').map(Number);
   const dailySecondsMap = new Map<string, number>();
-  const daysList: Array<{ date: string; day_name: string; day_short: string; day_num: number }> = [];
+  const daysList: Array<{ date: string; day_name: string; day_short: string; day_num: number; day_of_week: number }> = [];
 
   for (let i = 0; i < 7; i++) {
     const dayDate = new Date(y, m - 1, d + i);
@@ -175,6 +173,7 @@ const weeksDataList: WeekData[] = sortedWeekKeys.map((key) => {
       day_name: DAY_NAMES[dayIdx],
       day_short: DAY_SHORT[dayIdx],
       day_num: dayDate.getDate(),
+      day_of_week: dayIdx,
     });
   }
 
@@ -251,12 +250,15 @@ interface MonthData {
   formatted_short: string;
   entries_count: number;
   active_days_count: number;
+  days_in_month: number;
+  first_day_offset: number;
   games_count: number;
   top_game: GamePeriodStat | null;
   daily_distribution: Array<{
     date: string;
     day_num: number;
     day_short: string;
+    day_of_week: number;
     seconds: number;
     formatted: string;
     percent: number;
@@ -345,11 +347,15 @@ const monthsDataList: MonthData[] = sortedMonthKeys.map((monthKey) => {
       date: dayStr,
       day_num: day,
       day_short: DAY_SHORT[dObj.getDay()],
+      day_of_week: dObj.getDay(),
       seconds: secs,
       formatted: formatTimeShort(secs),
       percent: Math.round((secs / maxDaySeconds) * 100),
     });
   }
+
+  // Offset before day 1: Monday=0, Tuesday=1, ..., Sunday=6
+  const firstDayOffset = (new Date(y, m - 1, 1).getDay() + 6) % 7;
 
   return {
     id: monthKey,
@@ -360,6 +366,8 @@ const monthsDataList: MonthData[] = sortedMonthKeys.map((monthKey) => {
     formatted_short: formatTimeShort(monthTotalSeconds),
     entries_count: monthEntries.length,
     active_days_count: activeDaysSet.size,
+    days_in_month: daysInMonth,
+    first_day_offset: firstDayOffset,
     games_count: gamesStatsList.length,
     top_game: gamesStatsList[0] || null,
     daily_distribution: dailyDistribution,
@@ -370,24 +378,26 @@ const monthsDataList: MonthData[] = sortedMonthKeys.map((monthKey) => {
 const statsPayload = {
   weeks: weeksDataList,
   months: monthsDataList,
+  todayStr,
 };
 ---
 
 <Layout title="Estadísticas de Juego">
-  <!-- Page Header -->
-  <div class="section-header-block animate-fade-in">
-    <div class="section-title-wrap">
-      <h1 class="section-title-mark">Estadísticas e Histórico</h1>
+  <div class="stats-page-container">
+    <!-- Page Header -->
+    <div class="section-header-block animate-fade-in">
+      <div class="section-title-wrap">
+        <h1 class="section-title-mark">Estadísticas e Histórico</h1>
+      </div>
+      <p class="section-subtitle">
+        Explora tus horas de juego por semana, mes e histórico global con desglose detallado por juego
+      </p>
     </div>
-    <p class="section-subtitle">
-      Explora tus horas de juego por semana, mes e histórico global con desglose detallado por juego
-    </p>
-  </div>
 
-  <!-- Segmented View Tabs -->
-  <div class="stats-mode-tabs-wrapper animate-slide-up">
+    <!-- Segmented View Tabs -->
+    <div class="stats-mode-tabs-wrapper animate-slide-up">
     <div class="stats-mode-tabs">
-      <button class="mode-tab-btn active" data-mode="week" id="tab-btn-week">
+      <button class="mode-tab-btn" data-mode="week" id="tab-btn-week">
         <svg class="tab-icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
           <line x1="16" y1="2" x2="16" y2="6"></line>
@@ -396,7 +406,7 @@ const statsPayload = {
         </svg>
         <span class="tab-label">Vista Semanal</span>
       </button>
-      <button class="mode-tab-btn" data-mode="month" id="tab-btn-month">
+      <button class="mode-tab-btn active" data-mode="month" id="tab-btn-month">
         <svg class="tab-icon-svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
           <line x1="16" y1="2" x2="16" y2="6"></line>
@@ -545,20 +555,18 @@ const statsPayload = {
       <!-- Injected dynamically -->
     </div>
 
-    <!-- Distribution Chart Section -->
+    <!-- Activity Calendar / Distribution Section -->
     <section class="section distribution-section">
       <div class="section-header-block">
         <div class="section-title-wrap">
-          <h2 class="section-title-mark" id="dist-section-title">Distribución de Actividad Diaria</h2>
+          <h2 class="section-title-mark" id="dist-section-title">Actividad del Período</h2>
         </div>
-        <p class="section-subtitle" id="dist-section-subtitle">Horas registradas cada día en el período seleccionado</p>
+        <p class="section-subtitle" id="dist-section-subtitle">Días y horas dedicadas durante el período seleccionado</p>
       </div>
 
       <div class="chart-card card">
-        <div class="chart-scroll-wrapper">
-          <div id="chart-bars-container" class="chart-bars-container">
-            <!-- Rendered dynamically -->
-          </div>
+        <div id="chart-bars-container" class="chart-bars-container">
+          <!-- Rendered dynamically -->
         </div>
       </div>
     </section>
@@ -738,6 +746,7 @@ const statsPayload = {
 
   <!-- Raw Payload embedded for client reactivity -->
   <script id="stats-data" type="application/json" set:html={JSON.stringify(statsPayload)} />
+  </div>
 </Layout>
 
 <script>
@@ -759,6 +768,7 @@ const statsPayload = {
     day_name?: string;
     day_short: string;
     day_num: number;
+    day_of_week?: number;
     seconds: number;
     formatted: string;
     percent: number;
@@ -773,6 +783,8 @@ const statsPayload = {
     formatted_short: string;
     entries_count: number;
     active_days_count: number;
+    days_in_month?: number;
+    first_day_offset?: number;
     games_count: number;
     top_game: GameStat | null;
     daily_distribution: DayStat[];
@@ -782,6 +794,7 @@ const statsPayload = {
   interface Payload {
     weeks: PeriodRecord[];
     months: PeriodRecord[];
+    todayStr?: string;
   }
 
   const rawDataEl = document.getElementById('stats-data');
@@ -910,7 +923,7 @@ const statsPayload = {
           <div class="spotlight-body">
             <div class="spotlight-art-wrap">
               ${topG.cover_url
-                ? `<img src="${topG.cover_url}" alt="${topG.name}" class="spotlight-cover" />`
+                ? `<img src="${topG.cover_url}" alt="${topG.name}" class="spotlight-cover" loading="lazy" />`
                 : `<div class="spotlight-placeholder">🎮</div>`
               }
             </div>
@@ -933,7 +946,7 @@ const statsPayload = {
                     <circle cx="12" cy="12" r="10"></circle>
                     <polyline points="12 6 12 12 16 14"></polyline>
                   </svg>
-                  <strong>${topG.entries_count}</strong> sesiones
+                  <strong>${topG.entries_count}</strong> ${topG.entries_count === 1 ? 'sesión' : 'sesiones'}
                 </span>
                 <span class="spotlight-meta-pill">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -942,7 +955,7 @@ const statsPayload = {
                     <line x1="8" y1="2" x2="8" y2="6"></line>
                     <line x1="3" y1="10" x2="18" y2="10"></line>
                   </svg>
-                  <strong>${topG.days_count}</strong> días activos
+                  <strong>${topG.days_count}</strong> ${topG.days_count === 1 ? 'día activo' : 'días activos'}
                 </span>
               </div>
               <a href="/games/${topG.game_id}" class="btn btn-secondary btn-sm spotlight-btn">
@@ -966,16 +979,16 @@ const statsPayload = {
         `;
       }
 
-      // 3. Distribution Chart
+      // 3. Distribution Chart / Calendar
       if (currentMode === 'week') {
-        distTitle.textContent = `Distribución Diaria (${period.label})`;
-        distSubtitle.textContent = 'Horas dedicadas cada día de lunes a domingo';
+        distTitle.textContent = `Distribución Semanal (${period.label})`;
+        distSubtitle.textContent = 'Horas y sesiones registradas de lunes a domingo';
       } else {
-        distTitle.textContent = `Actividad del Mes (${period.label})`;
-        distSubtitle.textContent = 'Horas jugadas a lo largo de los días del mes';
+        distTitle.textContent = `Calendario de Actividad (${period.label})`;
+        distSubtitle.textContent = 'Desglose diario de horas jugadas a lo largo del mes';
       }
 
-      renderDistributionChart(period.daily_distribution, currentMode);
+      renderDistributionChart(period, currentMode);
 
       // 4. Games Breakdown List
       breakdownTitle.textContent = currentMode === 'week' ? 'Juegos Jugados en la Semana' : 'Juegos Jugados en el Mes';
@@ -985,35 +998,169 @@ const statsPayload = {
       updateNavButtonsState();
     }
 
-    function renderDistributionChart(days: DayStat[], mode: 'week' | 'month') {
+    function renderDistributionChart(period: PeriodRecord, mode: 'week' | 'month') {
       chartBarsContainer.innerHTML = '';
-      if (!days || days.length === 0) {
+      if (!period.daily_distribution || period.daily_distribution.length === 0) {
         chartBarsContainer.innerHTML = '<div class="chart-empty">Sin datos de actividad</div>';
         return;
       }
 
-      const isMonthly = mode === 'month';
-      chartBarsContainer.className = `chart-bars-container ${isMonthly ? 'chart-grid-month' : 'chart-grid-week'}`;
+      const today = data.todayStr || new Date().toISOString().slice(0, 10);
 
-      days.forEach((day) => {
-        const barItem = document.createElement('div');
-        barItem.className = `chart-bar-item ${day.seconds > 0 ? 'has-play' : 'is-idle'}`;
+      if (mode === 'month') {
+        const days = period.daily_distribution;
+        const totalDays = period.days_in_month || days.length;
+        const activeDays = period.active_days_count;
+        const firstDayOffset = period.first_day_offset ?? 0;
 
-        const heightPercent = Math.max(day.percent, day.seconds > 0 ? 8 : 2);
+        let maxDay: DayStat | null = null;
+        for (const d of days) {
+          if (d.seconds > 0 && (!maxDay || d.seconds > maxDay.seconds)) {
+            maxDay = d;
+          }
+        }
 
-        barItem.innerHTML = `
-          <div class="chart-bar-track" tabindex="0" aria-label="${day.date}: ${day.formatted}">
-            <div class="chart-bar-fill" style="height: ${heightPercent}%;"></div>
-            ${day.seconds > 0 ? `<div class="chart-bar-tooltip">${day.formatted}</div>` : ''}
-          </div>
-          <div class="chart-bar-label">
-            <span class="label-day">${day.day_short}</span>
-            <span class="label-num">${day.day_num}</span>
+        const avgActiveSecs = activeDays > 0 ? Math.round(period.total_seconds / activeDays) : 0;
+        let avgActiveFormatted = '0m';
+        if (avgActiveSecs > 0) {
+          const h = Math.floor(avgActiveSecs / 3600);
+          const m = Math.round((avgActiveSecs % 3600) / 60);
+          avgActiveFormatted = h > 0 ? `${h}h ${m}m` : `${m}m`;
+        }
+
+        let padHtml = '';
+        for (let i = 0; i < firstDayOffset; i++) {
+          padHtml += `<div class="cal-pad-cell" aria-hidden="true"></div>`;
+        }
+
+        const dayCellsHtml = days.map((day) => {
+          const isToday = day.date === today;
+          const isWeekend = day.day_of_week === 0 || day.day_of_week === 6;
+          const hasPlay = day.seconds > 0;
+          const progressWidth = Math.max(12, Math.min(100, day.percent));
+
+          return `
+            <div class="cal-day-cell ${hasPlay ? 'cal-has-play' : 'cal-is-idle'} ${isToday ? 'cal-is-today' : ''} ${isWeekend ? 'cal-is-weekend' : ''}" data-date="${day.date}" title="${day.date}: ${hasPlay ? day.formatted : 'Sin partidas'}">
+              <div class="cal-cell-header">
+                <div class="cal-cell-day-meta">
+                  <span class="cal-cell-num">${day.day_num}</span>
+                  <span class="cal-cell-dayname">${day.day_short}</span>
+                </div>
+                ${isToday ? `<span class="cal-today-pill">HOY</span>` : ''}
+              </div>
+              <div class="cal-cell-content">
+                ${hasPlay ? `
+                  <div class="cal-time-pill">${day.formatted}</div>
+                  <div class="cal-cell-bar">
+                    <div class="cal-cell-bar-fill" style="width: ${progressWidth}%;"></div>
+                  </div>
+                ` : `
+                  <span class="cal-cell-empty">—</span>
+                `}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        chartBarsContainer.innerHTML = `
+          <div class="month-calendar-view">
+            <div class="cal-summary-bar">
+              <div class="cal-summary-item">
+                <span class="cal-summary-label">Días con Juego</span>
+                <span class="cal-summary-value"><strong class="accent">${activeDays}</strong> de ${totalDays} días</span>
+              </div>
+              <div class="cal-summary-item">
+                <span class="cal-summary-label">Tiempo del Mes</span>
+                <span class="cal-summary-value font-display">${period.formatted_short || '0m'}</span>
+              </div>
+              <div class="cal-summary-item">
+                <span class="cal-summary-label">Promedio / Día Activo</span>
+                <span class="cal-summary-value">${avgActiveFormatted}</span>
+              </div>
+              ${maxDay ? `
+                <div class="cal-summary-item">
+                  <span class="cal-summary-label">Día Más Activo</span>
+                  <span class="cal-summary-value"><strong class="accent">${maxDay.formatted}</strong> (${maxDay.day_short} ${maxDay.day_num})</span>
+                </div>
+              ` : ''}
+            </div>
+
+            <div class="cal-grid-wrapper">
+              <div class="cal-weekdays-header">
+                <div class="cal-weekday-col">LUN</div>
+                <div class="cal-weekday-col">MAR</div>
+                <div class="cal-weekday-col">MIÉ</div>
+                <div class="cal-weekday-col">JUE</div>
+                <div class="cal-weekday-col">VIE</div>
+                <div class="cal-weekday-col cal-weekend">SÁB</div>
+                <div class="cal-weekday-col cal-weekend">DOM</div>
+              </div>
+              <div class="cal-days-grid">
+                ${padHtml}
+                ${dayCellsHtml}
+              </div>
+            </div>
           </div>
         `;
+      } else {
+        // Week View
+        const days = period.daily_distribution;
+        const activeDays = period.active_days_count;
 
-        chartBarsContainer.appendChild(barItem);
-      });
+        let maxDay: DayStat | null = null;
+        for (const d of days) {
+          if (d.seconds > 0 && (!maxDay || d.seconds > maxDay.seconds)) {
+            maxDay = d;
+          }
+        }
+
+        const dayCardsHtml = days.map((day) => {
+          const isToday = day.date === today;
+          const hasPlay = day.seconds > 0;
+          const barHeight = hasPlay ? Math.max(14, day.percent) : 3;
+
+          return `
+            <div class="week-day-card ${hasPlay ? 'has-play' : 'is-idle'} ${isToday ? 'is-today' : ''}" title="${day.date}: ${hasPlay ? day.formatted : 'Sin partidas'}">
+              <div class="week-day-header">
+                <span class="week-day-name">${day.day_short}</span>
+                <span class="week-day-num">${day.day_num}</span>
+                ${isToday ? `<span class="cal-today-pill">HOY</span>` : ''}
+              </div>
+              <div class="week-bar-container">
+                <div class="week-bar-fill" style="height: ${barHeight}%;"></div>
+              </div>
+              <div class="week-day-time ${hasPlay ? 'accent' : 'muted'}">
+                ${hasPlay ? day.formatted : '0m'}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        chartBarsContainer.innerHTML = `
+          <div class="week-calendar-view">
+            <div class="cal-summary-bar">
+              <div class="cal-summary-item">
+                <span class="cal-summary-label">Días Activos</span>
+                <span class="cal-summary-value"><strong class="accent">${activeDays}</strong> de 7 días</span>
+              </div>
+              <div class="cal-summary-item">
+                <span class="cal-summary-label">Total en la Semana</span>
+                <span class="cal-summary-value font-display">${period.formatted_short || '0m'}</span>
+              </div>
+              ${maxDay ? `
+                <div class="cal-summary-item">
+                  <span class="cal-summary-label">Día Más Jugado</span>
+                  <span class="cal-summary-value"><strong class="accent">${maxDay.formatted}</strong> (${maxDay.day_name || maxDay.day_short} ${maxDay.day_num})</span>
+                </div>
+              ` : ''}
+            </div>
+
+            <div class="week-days-grid">
+              ${dayCardsHtml}
+            </div>
+          </div>
+        `;
+      }
     }
 
     function renderGamesBreakdown(games: GameStat[], totalPeriodSeconds: number) {
@@ -1032,9 +1179,9 @@ const statsPayload = {
 
       games.forEach((game, index) => {
         const statusObj = STATUS_MAP[game.status] || { label: 'Jugando', class: 'badge-playing' };
-        const percentOfMax = games[0] ? Math.max(6, Math.round((game.total_seconds / games[0].total_seconds) * 100)) : 100;
+        const percentOfMax = games[0] && games[0].total_seconds > 0 ? Math.max(6, Math.round((game.total_seconds / games[0].total_seconds) * 100)) : 100;
         const rankClass = index === 0 ? 'rank-gold' : index === 1 ? 'rank-silver' : index === 2 ? 'rank-bronze' : 'rank-normal';
-        const rankBadge = index === 0 ? '🏆 #1' : `#${index + 1}`;
+        const rankBadge = index === 0 ? '🏆 #1' : index === 1 ? '🥈 #2' : index === 2 ? '🥉 #3' : `#${index + 1}`;
 
         const row = document.createElement('div');
         row.className = 'game-breakdown-row card';
@@ -1165,18 +1312,22 @@ const statsPayload = {
       }
     });
 
-    updatePeriodDropdown();
-    renderActivePeriod();
+    setMode('month');
   }
 </script>
 
-<style>
+<style is:global>
   /* ==========================================================================
-     STATS PAGE — GAMING IDENTITY SYSTEM & RESPONSIVE DESIGN
+     STATS PAGE CONTAINER — GAMING IDENTITY SYSTEM & RESPONSIVE DESIGN
+     Scoped under .stats-page-container to allow rich dynamic client-side rendering
      ========================================================================== */
 
+  .stats-page-container {
+    width: 100%;
+  }
+
   /* Mode Tabs Wrapper (responsive scroll on small screens) */
-  .stats-mode-tabs-wrapper {
+  .stats-page-container .stats-mode-tabs-wrapper {
     overflow-x: auto;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
@@ -1185,11 +1336,11 @@ const statsPayload = {
     padding-bottom: 4px;
   }
 
-  .stats-mode-tabs-wrapper::-webkit-scrollbar {
+  .stats-page-container .stats-mode-tabs-wrapper::-webkit-scrollbar {
     display: none;
   }
 
-  .stats-mode-tabs {
+  .stats-page-container .stats-mode-tabs {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -1201,7 +1352,7 @@ const statsPayload = {
     min-width: max-content;
   }
 
-  .mode-tab-btn {
+  .stats-page-container .mode-tab-btn {
     display: inline-flex;
     align-items: center;
     gap: 8px;
@@ -1218,30 +1369,30 @@ const statsPayload = {
     user-select: none;
   }
 
-  .mode-tab-btn:hover {
+  .stats-page-container .mode-tab-btn:hover {
     color: #ffffff;
     background: rgba(255, 255, 255, 0.04);
   }
 
-  .mode-tab-btn.active {
+  .stats-page-container .mode-tab-btn.active {
     background: linear-gradient(135deg, rgba(229, 57, 53, 0.28) 0%, rgba(229, 57, 53, 0.08) 100%);
     color: #ffffff;
     border-color: rgba(229, 57, 53, 0.5);
     box-shadow: 0 0 16px rgba(229, 57, 53, 0.25);
   }
 
-  .tab-icon-svg {
+  .stats-page-container .tab-icon-svg {
     color: var(--color-accent);
     flex-shrink: 0;
   }
 
-  .mode-tab-btn.active .tab-icon-svg {
+  .stats-page-container .mode-tab-btn.active .tab-icon-svg {
     color: #ff3344;
     filter: drop-shadow(0 0 6px rgba(229, 57, 53, 0.6));
   }
 
   /* Period Navigator Toolbar */
-  .period-nav-card {
+  .stats-page-container .period-nav-card {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1255,7 +1406,7 @@ const statsPayload = {
   }
 
   @media (max-width: 768px) {
-    .period-nav-card {
+    .stats-page-container .period-nav-card {
       flex-direction: column;
       align-items: stretch;
       gap: 12px;
@@ -1263,7 +1414,7 @@ const statsPayload = {
     }
   }
 
-  .period-nav-controls {
+  .stats-page-container .period-nav-controls {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1272,20 +1423,20 @@ const statsPayload = {
   }
 
   @media (max-width: 520px) {
-    .period-nav-controls {
+    .stats-page-container .period-nav-controls {
       display: grid;
       grid-template-columns: auto 1fr auto;
       width: 100%;
     }
   }
 
-  .nav-btn {
+  .stats-page-container .nav-btn {
     flex-shrink: 0;
     min-height: 40px;
     border-color: rgba(255, 255, 255, 0.12);
   }
 
-  .period-select-wrap {
+  .stats-page-container .period-select-wrap {
     position: relative;
     flex: 1;
     min-width: 0;
@@ -1293,12 +1444,12 @@ const statsPayload = {
   }
 
   @media (max-width: 520px) {
-    .period-select-wrap {
+    .stats-page-container .period-select-wrap {
       max-width: 100%;
     }
   }
 
-  .period-dropdown {
+  .stats-page-container .period-dropdown {
     appearance: none;
     width: 100%;
     background: #141622;
@@ -1319,13 +1470,13 @@ const statsPayload = {
     min-height: 40px;
   }
 
-  .period-dropdown:hover,
-  .period-dropdown:focus {
+  .stats-page-container .period-dropdown:hover,
+  .stats-page-container .period-dropdown:focus {
     border-color: var(--color-accent);
     box-shadow: 0 0 14px rgba(229, 57, 53, 0.25);
   }
 
-  .select-chevron {
+  .stats-page-container .select-chevron {
     position: absolute;
     right: 12px;
     top: 50%;
@@ -1334,12 +1485,12 @@ const statsPayload = {
     color: var(--color-text-secondary);
   }
 
-  .period-nav-actions {
+  .stats-page-container .period-nav-actions {
     display: flex;
     align-items: center;
   }
 
-  .current-badge-btn {
+  .stats-page-container .current-badge-btn {
     color: #00e676;
     font-weight: 600;
     border: 1px solid rgba(0, 230, 118, 0.2);
@@ -1348,13 +1499,13 @@ const statsPayload = {
     min-height: 40px;
   }
 
-  .current-badge-btn:hover {
+  .stats-page-container .current-badge-btn:hover {
     color: #00e676;
     background: rgba(0, 230, 118, 0.12);
     border-color: rgba(0, 230, 118, 0.4);
   }
 
-  .indicator-dot {
+  .stats-page-container .indicator-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
@@ -1364,12 +1515,12 @@ const statsPayload = {
     display: inline-block;
   }
 
-  /* Metric Cards Grid (Matching StatsCard identity) */
-  .period-metrics-section {
+  /* Metric Cards Grid */
+  .stats-page-container .period-metrics-section {
     margin-bottom: var(--space-xl);
   }
 
-  .period-metrics-row {
+  .stats-page-container .period-metrics-row {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: var(--space-md);
@@ -1377,18 +1528,18 @@ const statsPayload = {
   }
 
   @media (max-width: 1100px) {
-    .period-metrics-row {
+    .stats-page-container .period-metrics-row {
       grid-template-columns: repeat(2, 1fr);
     }
   }
 
   @media (max-width: 540px) {
-    .period-metrics-row {
+    .stats-page-container .period-metrics-row {
       grid-template-columns: 1fr;
     }
   }
 
-  .metric-card {
+  .stats-page-container .metric-card {
     position: relative;
     background: #0d0f16;
     border: 1px solid rgba(255, 255, 255, 0.07);
@@ -1402,33 +1553,33 @@ const statsPayload = {
     transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
   }
 
-  .metric-card:hover {
+  .stats-page-container .metric-card:hover {
     transform: translateY(-3px);
     border-color: rgba(229, 57, 53, 0.35);
     background: #11131c;
   }
 
-  .metric-card.highlighted {
+  .stats-page-container .metric-card.highlighted {
     border-color: rgba(229, 57, 53, 0.65);
     background: linear-gradient(135deg, #161117 0%, #0d0f16 100%);
     box-shadow: 0 0 20px rgba(229, 57, 53, 0.2), inset 0 0 12px rgba(229, 57, 53, 0.08);
   }
 
-  .metric-top {
+  .stats-page-container .metric-top {
     display: flex;
     align-items: center;
     gap: 8px;
     margin-bottom: 8px;
   }
 
-  .metric-icon-wrap {
+  .stats-page-container .metric-icon-wrap {
     color: var(--color-accent);
     display: flex;
     align-items: center;
     justify-content: center;
   }
 
-  .metric-label {
+  .stats-page-container .metric-label {
     font-size: 0.6875rem;
     font-weight: 700;
     letter-spacing: 0.08em;
@@ -1436,7 +1587,7 @@ const statsPayload = {
     text-transform: uppercase;
   }
 
-  .metric-value {
+  .stats-page-container .metric-value {
     font-family: var(--font-display);
     font-size: 1.35rem;
     font-weight: 800;
@@ -1449,17 +1600,17 @@ const statsPayload = {
     text-overflow: ellipsis;
   }
 
-  .metric-value.accent-glow {
+  .stats-page-container .metric-value.accent-glow {
     color: #ff3344;
     text-shadow: 0 0 12px rgba(229, 57, 53, 0.4);
   }
 
-  .metric-subtitle {
+  .stats-page-container .metric-subtitle {
     font-size: 0.75rem;
     color: #6b6b80;
   }
 
-  .corner-slash {
+  .stats-page-container .corner-slash {
     position: absolute;
     bottom: -6px;
     right: -6px;
@@ -1470,7 +1621,7 @@ const statsPayload = {
     pointer-events: none;
   }
 
-  .metric-card.highlighted .corner-slash {
+  .stats-page-container .metric-card.highlighted .corner-slash {
     width: 28px;
     height: 20px;
     background: linear-gradient(135deg, transparent 50%, #ff1744 50%);
@@ -1478,116 +1629,115 @@ const statsPayload = {
   }
 
   /* Spotlight Featured Game Banner */
-  .spotlight-card {
+  .stats-page-container .spotlight-card {
     position: relative;
-    background: linear-gradient(135deg, #161824 0%, #0d0f16 100%);
-    border: 1px solid rgba(229, 57, 53, 0.4);
+    background: linear-gradient(135deg, #131520 0%, #0c0d15 100%);
+    border: 1px solid rgba(229, 57, 53, 0.35);
     border-radius: var(--radius-lg);
-    padding: var(--space-xl);
+    padding: var(--space-lg) var(--space-xl);
     overflow: hidden;
-    box-shadow: 0 0 25px rgba(229, 57, 53, 0.15);
+    box-shadow: 0 0 25px rgba(229, 57, 53, 0.12), 0 8px 32px rgba(0, 0, 0, 0.5);
     margin-bottom: var(--space-2xl);
   }
 
-  .spotlight-spine {
+  .stats-page-container .spotlight-spine {
     position: absolute;
     top: 0;
     bottom: 0;
     left: 0;
-    width: 5px;
+    width: 4px;
     background: linear-gradient(180deg, #ff1744 0%, #c62828 100%);
     box-shadow: 0 0 12px rgba(229, 57, 53, 0.6);
   }
 
-  .spotlight-badge {
-    display: inline-block;
+  .stats-page-container .spotlight-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-size: 0.6875rem;
     font-weight: 800;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     color: #ff3344;
-    background: rgba(229, 57, 53, 0.15);
+    background: rgba(229, 57, 53, 0.12);
     padding: 4px 10px;
     border-radius: 4px;
     margin-bottom: var(--space-md);
-    width: fit-content;
-    border: 1px solid rgba(229, 57, 53, 0.3);
+    border: 1px solid rgba(229, 57, 53, 0.25);
   }
 
-  .spotlight-body {
+  .stats-page-container .spotlight-body {
     display: flex;
     align-items: center;
     gap: var(--space-xl);
   }
 
-  @media (max-width: 640px) {
-    .spotlight-body {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: var(--space-md);
-    }
-  }
-
-  .spotlight-art-wrap {
+  .stats-page-container .spotlight-art-wrap {
     flex-shrink: 0;
   }
 
-  .spotlight-cover {
-    width: 90px;
-    height: 125px;
+  .stats-page-container .spotlight-cover {
+    width: 105px;
+    height: 147px;
+    aspect-ratio: 5 / 7;
     object-fit: cover;
     border-radius: var(--radius-md);
     border: 1px solid rgba(255, 255, 255, 0.15);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 16px rgba(229, 57, 53, 0.15);
+    display: block;
   }
 
-  .spotlight-placeholder {
-    width: 90px;
-    height: 125px;
-    background: #1a1c28;
+  .stats-page-container .spotlight-placeholder {
+    width: 105px;
+    height: 147px;
+    background: #181a26;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 2.5rem;
+    font-size: 2.2rem;
     border-radius: var(--radius-md);
     border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
+    flex-shrink: 0;
   }
 
-  .spotlight-info {
+  .stats-page-container .spotlight-info {
     flex: 1;
     min-width: 0;
   }
 
-  .spotlight-header-row {
+  .stats-page-container .spotlight-header-row {
     display: flex;
     align-items: center;
     gap: var(--space-md);
-    margin-bottom: 4px;
+    margin-bottom: 2px;
     flex-wrap: wrap;
   }
 
-  .spotlight-title {
+  .stats-page-container .spotlight-title {
     font-family: var(--font-display);
-    font-size: 1.5rem;
+    font-size: clamp(1.2rem, 2.2vw, 1.6rem);
     font-weight: 800;
     color: #ffffff;
-    margin-bottom: 0;
+    margin: 0;
+    line-height: 1.2;
   }
 
-  .spotlight-subtitle {
+  .stats-page-container .spotlight-subtitle {
     font-size: 0.875rem;
     color: var(--color-text-muted);
   }
 
-  .spotlight-time {
+  .stats-page-container .spotlight-time {
     font-family: var(--font-display);
-    font-size: 1.75rem;
+    font-size: clamp(1.4rem, 2.8vw, 1.85rem);
     font-weight: 800;
-    color: var(--color-accent);
+    color: #ff3344;
     margin: 6px 0 10px;
-    text-shadow: 0 0 16px rgba(229, 57, 53, 0.35);
+    text-shadow: 0 0 16px rgba(229, 57, 53, 0.4);
+    line-height: 1.1;
   }
 
-  .spotlight-meta {
+  .stats-page-container .spotlight-meta {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1595,174 +1745,90 @@ const statsPayload = {
     flex-wrap: wrap;
   }
 
-  .spotlight-meta-pill {
+  .stats-page-container .spotlight-meta-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     font-size: 0.75rem;
     color: var(--color-text-secondary);
     background: rgba(255, 255, 255, 0.05);
-    padding: 3px 10px;
+    padding: 4px 10px;
     border-radius: var(--radius-full);
     border: 1px solid rgba(255, 255, 255, 0.08);
   }
 
-  .spotlight-meta-pill.highlight-pill {
+  .stats-page-container .spotlight-meta-pill.highlight-pill {
     color: #ff3344;
     background: rgba(229, 57, 53, 0.1);
     border-color: rgba(229, 57, 53, 0.25);
   }
 
-  .spotlight-btn {
+  .stats-page-container .spotlight-btn {
     margin-top: 2px;
   }
 
-  .spotlight-empty-body {
+  .stats-page-container .spotlight-empty-body {
     padding: var(--space-md) 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-lg);
   }
 
-  /* Activity Distribution Chart Card */
-  .chart-card {
-    padding: var(--space-xl) var(--space-lg) var(--space-md);
+  @media (max-width: 640px) {
+    .stats-page-container .spotlight-card {
+      padding: var(--space-md);
+    }
+    .stats-page-container .spotlight-body {
+      flex-direction: row;
+      align-items: flex-start;
+      gap: var(--space-md);
+    }
+    .stats-page-container .spotlight-cover,
+    .stats-page-container .spotlight-placeholder {
+      width: 80px;
+      height: 112px;
+    }
+    .stats-page-container .spotlight-title {
+      font-size: 1.15rem;
+    }
+    .stats-page-container .spotlight-time {
+      font-size: 1.35rem;
+    }
+    .stats-page-container .spotlight-meta-pill {
+      font-size: 0.6875rem;
+      padding: 3px 8px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .stats-page-container .spotlight-body {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+    .stats-page-container .spotlight-header-row {
+      justify-content: center;
+    }
+    .stats-page-container .spotlight-meta {
+      justify-content: center;
+    }
+  }
+
+  /* Activity Calendar Section */
+  .stats-page-container .chart-card {
+    padding: var(--space-lg);
     background: #0d0f16;
     border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-lg);
   }
 
-  .chart-scroll-wrapper {
-    overflow-x: auto;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(229, 57, 53, 0.4) transparent;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 8px;
-  }
-
-  .chart-scroll-wrapper::-webkit-scrollbar {
-    height: 6px;
-  }
-
-  .chart-scroll-wrapper::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .chart-scroll-wrapper::-webkit-scrollbar-thumb {
-    background: rgba(229, 57, 53, 0.4);
-    border-radius: 3px;
-  }
-
-  .chart-bars-container {
-    display: flex;
-    align-items: flex-end;
-    height: 160px;
-    gap: var(--space-md);
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    min-width: 100%;
-  }
-
-  .chart-grid-week {
+  .stats-page-container .chart-bars-container {
     width: 100%;
-    justify-content: space-between;
   }
 
-  .chart-grid-month {
-    gap: 6px;
-    min-width: 600px;
-  }
-
-  .chart-bar-item {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    height: 100%;
-    position: relative;
-  }
-
-  .chart-bar-track {
-    flex: 1;
+  .stats-page-container .chart-empty {
     width: 100%;
-    max-width: 42px;
-    display: flex;
-    align-items: flex-end;
-    position: relative;
-    cursor: pointer;
-    outline: none;
-  }
-
-  .chart-grid-month .chart-bar-track {
-    max-width: 20px;
-  }
-
-  .chart-bar-fill {
-    width: 100%;
-    background: rgba(255, 255, 255, 0.07);
-    border-radius: 4px 4px 0 0;
-    transition: all var(--transition-fast);
-  }
-
-  .chart-bar-item.has-play .chart-bar-fill {
-    background: linear-gradient(180deg, #ff3344 0%, #e53935 100%);
-    box-shadow: 0 0 10px rgba(229, 57, 53, 0.45);
-  }
-
-  .chart-bar-item:hover .chart-bar-fill,
-  .chart-bar-track:focus .chart-bar-fill {
-    background: #ff4d5a;
-    box-shadow: 0 0 16px rgba(229, 57, 53, 0.75);
-    transform: scaleX(1.05);
-  }
-
-  .chart-bar-tooltip {
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%) translateY(-6px);
-    background: #1b1d2a;
-    color: #ffffff;
-    font-size: 0.6875rem;
-    font-weight: 700;
-    padding: 4px 8px;
-    border-radius: 4px;
-    border: 1px solid rgba(229, 57, 53, 0.4);
-    white-space: nowrap;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity var(--transition-fast);
-    z-index: 20;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
-  }
-
-  .chart-bar-item:hover .chart-bar-tooltip,
-  .chart-bar-track:focus .chart-bar-tooltip {
-    opacity: 1;
-  }
-
-  .chart-bar-label {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin-top: 8px;
-    user-select: none;
-  }
-
-  .label-day {
-    font-size: 0.6875rem;
-    font-weight: 700;
-    color: var(--color-text-secondary);
-    text-transform: uppercase;
-  }
-
-  .label-num {
-    font-size: 0.625rem;
-    color: var(--color-text-muted);
-  }
-
-  .chart-grid-month .chart-bar-label .label-day {
-    display: none;
-  }
-
-  .chart-empty {
-    width: 100%;
+    padding: var(--space-xl) 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1770,8 +1836,350 @@ const statsPayload = {
     font-size: 0.875rem;
   }
 
+  /* Calendar Summary Bar */
+  .stats-page-container .cal-summary-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-xl);
+    padding: 12px 18px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--space-lg);
+    flex-wrap: wrap;
+  }
+
+  @media (max-width: 640px) {
+    .stats-page-container .cal-summary-bar {
+      gap: var(--space-md);
+      padding: 10px 14px;
+    }
+  }
+
+  .stats-page-container .cal-summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .stats-page-container .cal-summary-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: #8b8c9e;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .stats-page-container .cal-summary-value {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: #ffffff;
+  }
+
+  .stats-page-container .cal-summary-value strong.accent {
+    color: #ff3344;
+  }
+
+  .stats-page-container .cal-summary-value.font-display {
+    font-family: var(--font-display);
+    color: #ff3344;
+    letter-spacing: 0.02em;
+  }
+
+  /* MONTH CALENDAR VIEW (7 columns: Lun - Dom) */
+  .stats-page-container .month-calendar-view {
+    width: 100%;
+  }
+
+  .stats-page-container .cal-grid-wrapper {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+  }
+
+  .stats-page-container .cal-weekdays-header {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+    min-width: 480px;
+  }
+
+  .stats-page-container .cal-weekday-col {
+    text-align: center;
+    font-size: 0.6875rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: #8b8c9e;
+    padding: 6px 0;
+    user-select: none;
+  }
+
+  .stats-page-container .cal-weekday-col.cal-weekend {
+    color: #e57373;
+  }
+
+  .stats-page-container .cal-days-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+    min-width: 480px;
+  }
+
+  @media (max-width: 600px) {
+    .stats-page-container .cal-weekdays-header,
+    .stats-page-container .cal-days-grid {
+      gap: 5px;
+      min-width: 420px;
+    }
+  }
+
+  .stats-page-container .cal-pad-cell {
+    background: transparent;
+    border-radius: var(--radius-sm);
+    min-height: 68px;
+  }
+
+  .stats-page-container .cal-day-cell {
+    position: relative;
+    background: #11131d;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: var(--radius-sm);
+    padding: 7px 9px;
+    min-height: 68px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: all var(--transition-fast);
+  }
+
+  .stats-page-container .cal-day-cell:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+    background: #161826;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+
+  .stats-page-container .cal-day-cell.cal-is-weekend {
+    background: #131522;
+  }
+
+  .stats-page-container .cal-day-cell.cal-has-play {
+    background: linear-gradient(135deg, rgba(229, 57, 53, 0.12) 0%, #11131d 100%);
+    border-color: rgba(229, 57, 53, 0.35);
+  }
+
+  .stats-page-container .cal-day-cell.cal-has-play:hover {
+    border-color: rgba(229, 57, 53, 0.7);
+    box-shadow: 0 0 16px rgba(229, 57, 53, 0.25);
+  }
+
+  .stats-page-container .cal-day-cell.cal-is-today {
+    border-color: rgba(0, 230, 118, 0.5);
+    box-shadow: 0 0 10px rgba(0, 230, 118, 0.2);
+  }
+
+  .stats-page-container .cal-cell-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .stats-page-container .cal-cell-day-meta {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+  }
+
+  .stats-page-container .cal-cell-num {
+    font-size: 0.8125rem;
+    font-weight: 700;
+    color: #a5a6ba;
+  }
+
+  .stats-page-container .cal-has-play .cal-cell-num {
+    color: #ffffff;
+    font-weight: 800;
+  }
+
+  .stats-page-container .cal-cell-dayname {
+    font-size: 0.5625rem;
+    color: #555768;
+    text-transform: uppercase;
+  }
+
+  .stats-page-container .cal-today-pill {
+    font-size: 0.5625rem;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    padding: 1px 5px;
+    background: rgba(0, 230, 118, 0.2);
+    color: #00e676;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 230, 118, 0.4);
+  }
+
+  .stats-page-container .cal-cell-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+  }
+
+  .stats-page-container .cal-time-pill {
+    font-family: var(--font-display);
+    font-size: 0.8125rem;
+    font-weight: 800;
+    color: #ff3344;
+    letter-spacing: 0.02em;
+    text-shadow: 0 0 8px rgba(229, 57, 53, 0.4);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .stats-page-container .cal-cell-bar {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .stats-page-container .cal-cell-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #e53935 0%, #ff3344 100%);
+    border-radius: 2px;
+  }
+
+  .stats-page-container .cal-cell-empty {
+    font-size: 0.8125rem;
+    color: rgba(255, 255, 255, 0.12);
+    font-weight: 700;
+    line-height: 1.4;
+  }
+
+  /* WEEK CALENDAR VIEW */
+  .stats-page-container .week-calendar-view {
+    width: 100%;
+  }
+
+  .stats-page-container .week-days-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: var(--space-md);
+  }
+
+  @media (max-width: 900px) {
+    .stats-page-container .week-days-grid {
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 8px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .stats-page-container .week-days-grid {
+      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+      gap: 6px;
+    }
+  }
+
+  .stats-page-container .week-day-card {
+    background: #11131d;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: var(--radius-md);
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    transition: all var(--transition-fast);
+  }
+
+  .stats-page-container .week-day-card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255, 255, 255, 0.2);
+    background: #161826;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  }
+
+  .stats-page-container .week-day-card.has-play {
+    background: linear-gradient(180deg, rgba(229, 57, 53, 0.12) 0%, #11131d 100%);
+    border-color: rgba(229, 57, 53, 0.35);
+  }
+
+  .stats-page-container .week-day-card.has-play:hover {
+    border-color: rgba(229, 57, 53, 0.7);
+    box-shadow: 0 0 16px rgba(229, 57, 53, 0.25);
+  }
+
+  .stats-page-container .week-day-card.is-today {
+    border-color: rgba(0, 230, 118, 0.5);
+    box-shadow: 0 0 12px rgba(0, 230, 118, 0.2);
+  }
+
+  .stats-page-container .week-day-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .stats-page-container .week-day-name {
+    font-size: 0.6875rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    color: #8b8c9e;
+    letter-spacing: 0.06em;
+  }
+
+  .stats-page-container .week-day-num {
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #ffffff;
+  }
+
+  .stats-page-container .week-bar-container {
+    width: 18px;
+    height: 85px;
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 9px;
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+    padding: 2px;
+  }
+
+  .stats-page-container .week-bar-fill {
+    width: 100%;
+    background: linear-gradient(180deg, #ff3344 0%, #e53935 100%);
+    border-radius: 7px;
+    transition: height var(--transition-fast);
+  }
+
+  .stats-page-container .week-day-card.has-play .week-bar-fill {
+    box-shadow: 0 0 10px rgba(229, 57, 53, 0.5);
+  }
+
+  .stats-page-container .week-day-time {
+    font-family: var(--font-display);
+    font-size: 0.8125rem;
+    font-weight: 800;
+  }
+
+  .stats-page-container .week-day-time.accent {
+    color: #ff3344;
+    text-shadow: 0 0 8px rgba(229, 57, 53, 0.4);
+  }
+
+  .stats-page-container .week-day-time.muted {
+    color: #555768;
+  }
+
   /* Games Breakdown List */
-  .count-pill {
+  .stats-page-container .count-pill {
     font-size: 0.75rem;
     font-weight: 700;
     background: rgba(229, 57, 53, 0.15);
@@ -1781,17 +2189,17 @@ const statsPayload = {
     border: 1px solid rgba(229, 57, 53, 0.3);
   }
 
-  .games-breakdown-list {
+  .stats-page-container .games-breakdown-list {
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
   }
 
-  .game-breakdown-row {
+  .stats-page-container .game-breakdown-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 18px;
+    padding: 12px 18px;
     background: #0d0f16;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: var(--radius-lg);
@@ -1799,14 +2207,14 @@ const statsPayload = {
     gap: var(--space-lg);
   }
 
-  .game-breakdown-row:hover {
+  .stats-page-container .game-breakdown-row:hover {
     transform: translateY(-2px);
     border-color: rgba(229, 57, 53, 0.4);
     background: #11131c;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 16px rgba(229, 57, 53, 0.15);
   }
 
-  .breakdown-left {
+  .stats-page-container .breakdown-left {
     display: flex;
     align-items: center;
     gap: var(--space-md);
@@ -1814,110 +2222,115 @@ const statsPayload = {
     min-width: 0;
   }
 
-  .breakdown-rank {
+  .stats-page-container .breakdown-rank {
     font-family: var(--font-display);
-    font-size: 1.125rem;
+    font-size: 1.1rem;
     font-weight: 800;
-    width: 34px;
+    width: 38px;
     flex-shrink: 0;
   }
 
-  .rank-gold {
+  .stats-page-container .rank-gold {
     color: #ffd700;
     text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
-    font-size: 1.25rem;
+    font-size: 1.2rem;
   }
 
-  .rank-silver {
+  .stats-page-container .rank-silver {
     color: #e0e0e0;
     text-shadow: 0 0 8px rgba(224, 224, 224, 0.4);
   }
 
-  .rank-bronze {
+  .stats-page-container .rank-bronze {
     color: #cd7f32;
     text-shadow: 0 0 8px rgba(205, 127, 50, 0.4);
   }
 
-  .rank-normal {
+  .stats-page-container .rank-normal {
     color: #6b6b80;
   }
 
-  .breakdown-thumb-link {
+  .stats-page-container .breakdown-thumb-link {
     flex-shrink: 0;
+    display: block;
   }
 
-  .breakdown-thumb {
+  .stats-page-container .breakdown-thumb {
     width: 48px;
-    height: 64px;
+    height: 66px;
+    aspect-ratio: 5 / 7;
     object-fit: cover;
     border-radius: var(--radius-sm);
     border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
     transition: transform var(--transition-fast);
+    display: block;
   }
 
-  .breakdown-thumb:hover {
+  .stats-page-container .breakdown-thumb:hover {
     transform: scale(1.05);
   }
 
-  .breakdown-thumb-placeholder {
+  .stats-page-container .breakdown-thumb-placeholder {
     width: 48px;
-    height: 64px;
-    background: #1a1c28;
+    height: 66px;
+    background: #181a26;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: var(--radius-sm);
     font-size: 1.35rem;
     border: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
   }
 
-  .breakdown-info {
+  .stats-page-container .breakdown-info {
     flex: 1;
     min-width: 0;
   }
 
-  .breakdown-header-row {
+  .stats-page-container .breakdown-header-row {
     display: flex;
     align-items: center;
     gap: var(--space-sm);
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     flex-wrap: wrap;
   }
 
-  .breakdown-game-title {
-    font-size: 1rem;
+  .stats-page-container .breakdown-game-title {
+    font-size: 0.95rem;
     font-weight: 700;
     color: #ffffff;
     text-decoration: none;
     transition: color var(--transition-fast);
   }
 
-  .breakdown-game-title:hover {
+  .stats-page-container .breakdown-game-title:hover {
     color: var(--color-accent);
   }
 
-  .badge-compact {
+  .stats-page-container .badge-compact {
     padding: 2px 7px;
     font-size: 0.625rem;
   }
 
-  .breakdown-meta-row {
+  .stats-page-container .breakdown-meta-row {
     display: flex;
     align-items: center;
     gap: var(--space-md);
     font-size: 0.75rem;
     color: var(--color-text-muted);
+    flex-wrap: wrap;
   }
 
-  .meta-tag {
+  .stats-page-container .meta-tag {
     display: inline-flex;
     align-items: center;
     gap: 4px;
   }
 
-  .breakdown-right {
-    width: 260px;
+  .stats-page-container .breakdown-right {
+    width: 240px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
@@ -1925,44 +2338,45 @@ const statsPayload = {
   }
 
   @media (max-width: 768px) {
-    .game-breakdown-row {
+    .stats-page-container .game-breakdown-row {
       flex-direction: column;
       align-items: stretch;
       gap: 12px;
+      padding: 12px;
     }
-    .breakdown-right {
+    .stats-page-container .breakdown-right {
       width: 100%;
     }
   }
 
-  .breakdown-time-row {
+  .stats-page-container .breakdown-time-row {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
   }
 
-  .breakdown-time-value {
+  .stats-page-container .breakdown-time-value {
     font-family: var(--font-display);
-    font-size: 1.125rem;
+    font-size: 1.1rem;
     font-weight: 800;
     color: var(--color-accent);
     letter-spacing: 0.02em;
   }
 
-  .breakdown-share-badge {
+  .stats-page-container .breakdown-share-badge {
     font-size: 0.75rem;
     font-weight: 700;
     color: var(--color-text-secondary);
   }
 
-  .breakdown-bar-bg {
+  .stats-page-container .breakdown-bar-bg {
     height: 7px;
     background: rgba(255, 255, 255, 0.07);
     border-radius: 4px;
     overflow: hidden;
   }
 
-  .breakdown-bar-fill {
+  .stats-page-container .breakdown-bar-fill {
     height: 100%;
     background: linear-gradient(90deg, #e53935 0%, #ff3344 100%);
     border-radius: 4px;
@@ -1970,7 +2384,7 @@ const statsPayload = {
   }
 
   /* All Time Ranking Card */
-  .ranking-card {
+  .stats-page-container .ranking-card {
     padding: var(--space-lg);
     display: flex;
     flex-direction: column;
@@ -1978,7 +2392,7 @@ const statsPayload = {
     background: #0d0f16;
   }
 
-  .ranking-row {
+  .stats-page-container .ranking-row {
     display: flex;
     align-items: center;
     gap: var(--space-md);
@@ -1986,62 +2400,66 @@ const statsPayload = {
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   }
 
-  .ranking-row:last-child {
+  .stats-page-container .ranking-row:last-child {
     border-bottom: none;
     padding-bottom: 0;
   }
 
-  .ranking-index {
+  .stats-page-container .ranking-index {
     font-family: var(--font-display);
-    font-size: 1.125rem;
+    font-size: 1.1rem;
     font-weight: 800;
     width: 36px;
     flex-shrink: 0;
   }
 
-  .ranking-art {
+  .stats-page-container .ranking-art {
     flex-shrink: 0;
   }
 
-  .ranking-thumb {
+  .stats-page-container .ranking-thumb {
     width: 44px;
-    height: 58px;
+    height: 60px;
+    aspect-ratio: 5 / 7;
     object-fit: cover;
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.1);
+    display: block;
   }
 
-  .ranking-placeholder {
+  .stats-page-container .ranking-placeholder {
     width: 44px;
-    height: 58px;
-    background: #1a1c28;
+    height: 60px;
+    background: #181a26;
     display: flex;
     align-items: center;
     justify-content: center;
     border-radius: 6px;
     font-size: 1.25rem;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    flex-shrink: 0;
   }
 
-  .ranking-details {
+  .stats-page-container .ranking-details {
     flex: 1;
     min-width: 0;
   }
 
-  .ranking-header {
+  .stats-page-container .ranking-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     margin-bottom: 6px;
   }
 
-  .ranking-title-wrap {
+  .stats-page-container .ranking-title-wrap {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
   }
 
-  .ranking-name {
+  .stats-page-container .ranking-name {
     font-size: 0.9375rem;
     font-weight: 700;
     color: #fff;
@@ -2049,18 +2467,18 @@ const statsPayload = {
     transition: color var(--transition-fast);
   }
 
-  .ranking-name:hover {
+  .stats-page-container .ranking-name:hover {
     color: var(--color-accent);
   }
 
-  .ranking-time {
+  .stats-page-container .ranking-time {
     font-family: var(--font-display);
     font-size: 0.9375rem;
     font-weight: 700;
     color: var(--color-accent);
   }
 
-  .ranking-bar-bg {
+  .stats-page-container .ranking-bar-bg {
     height: 8px;
     background: rgba(255, 255, 255, 0.06);
     border-radius: 4px;
@@ -2068,14 +2486,14 @@ const statsPayload = {
     margin-bottom: 4px;
   }
 
-  .ranking-bar-fill {
+  .stats-page-container .ranking-bar-fill {
     height: 100%;
     background: linear-gradient(90deg, #e53935 0%, #ff3344 100%);
     border-radius: 4px;
     box-shadow: 0 0 10px rgba(229, 57, 53, 0.5);
   }
 
-  .ranking-footer {
+  .stats-page-container .ranking-footer {
     display: flex;
     justify-content: space-between;
     font-size: 0.6875rem;

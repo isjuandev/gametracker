@@ -3,7 +3,7 @@ import Layout from '../layouts/Layout.astro';
 import StatsCard from '../components/StatsCard.astro';
 import GameCard from '../components/GameCard.astro';
 import { supabase } from '../lib/supabase';
-import { formatTime } from '../types/database';
+import { formatTime, getLocalDateStr } from '../types/database';
 import type { GameWithStats } from '../types/database';
 
 // Fetch games
@@ -24,11 +24,11 @@ let totalSecondsWeek = 0;
 let totalSecondsMonth = 0;
 
 const now = new Date();
-const todayStr = now.toISOString().split('T')[0];
+const todayStr = getLocalDateStr(now);
 const weekAgo = new Date(now);
 weekAgo.setDate(weekAgo.getDate() - 7);
-const weekAgoStr = weekAgo.toISOString().split('T')[0];
-const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+const weekAgoStr = getLocalDateStr(weekAgo);
+const monthStart = getLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
 
 for (const entry of allEntries || []) {
   const current = totalsMap.get(entry.game_id) || { total_seconds: 0, entries_count: 0, last_played_at: null };

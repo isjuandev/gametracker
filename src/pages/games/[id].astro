@@ -1,7 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import { supabase } from '../../lib/supabase';
-import { formatTime, STATUS_LABELS } from '../../types/database';
+import { formatTime, STATUS_LABELS, getLocalDateStr } from '../../types/database';
 import type { Game, TimeEntry } from '../../types/database';
 
 const { id } = Astro.params;
@@ -30,11 +30,11 @@ const allEntries = (entries || []) as TimeEntry[];
 const totalSeconds = allEntries.reduce((sum, e) => sum + e.total_seconds, 0);
 
 const now = new Date();
-const todayStr = now.toISOString().split('T')[0];
+const todayStr = getLocalDateStr(now);
 const weekAgo = new Date(now);
 weekAgo.setDate(weekAgo.getDate() - 7);
-const weekAgoStr = weekAgo.toISOString().split('T')[0];
-const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+const weekAgoStr = getLocalDateStr(weekAgo);
+const monthStart = getLocalDateStr(new Date(now.getFullYear(), now.getMonth(), 1));
 
 const todaySeconds = allEntries
   .filter(e => e.played_at === todayStr)
@@ -126,33 +126,88 @@ function formatDate(dateStr: string): string {
 
       <form id="time-form" class="time-form card">
         <div class="time-form-row">
-          <div class="time-input-wrapper">
-            <div class="time-input-group">
-              <div>
-                <input type="number" id="time-hours" class="form-input time-input" value="0" min="0" max="999" />
-                <div class="time-label">Horas</div>
-              </div>
-              <span class="time-separator">:</span>
-              <div>
-                <input type="number" id="time-minutes" class="form-input time-input" value="0" min="0" max="59" />
-                <div class="time-label">Minutos</div>
-              </div>
-              <span class="time-separator">:</span>
-              <div>
-                <input type="number" id="time-seconds" class="form-input time-input" value="0" min="0" max="59" />
-                <div class="time-label">Segundos</div>
-              </div>
-            </div>
-          </div>
-
           <div class="time-form-fields">
-            <div class="form-group">
-              <label class="form-label" for="time-date">Fecha</label>
-              <input type="date" id="time-date" class="form-input" value={todayStr} />
+            <div class="form-group time-hms-group">
+              <label class="form-label">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block; vertical-align:-2px; margin-right:4px;">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                Tiempo Jugado
+              </label>
+              <div class="time-hms-container">
+                <div class="time-hms-box">
+                  <input
+                    type="text"
+                    id="time-hours"
+                    class="form-input time-hms-input"
+                    placeholder="00"
+                    maxlength="3"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    autocomplete="off"
+                  />
+                  <span class="time-hms-label">Horas</span>
+                </div>
+                <span class="time-hms-colon">:</span>
+                <div class="time-hms-box">
+                  <input
+                    type="text"
+                    id="time-minutes"
+                    class="form-input time-hms-input"
+                    placeholder="00"
+                    maxlength="2"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    autocomplete="off"
+                  />
+                  <span class="time-hms-label">Minutos</span>
+                </div>
+                <span class="time-hms-colon">:</span>
+                <div class="time-hms-box">
+                  <input
+                    type="text"
+                    id="time-seconds"
+                    class="form-input time-hms-input"
+                    placeholder="00"
+                    maxlength="2"
+                    inputmode="numeric"
+                    pattern="[0-9]*"
+                    autocomplete="off"
+                  />
+                  <span class="time-hms-label">Segundos</span>
+                </div>
+              </div>
             </div>
-            <div class="form-group">
+
+            <div class="form-group date-field-group">
+              <label class="form-label" for="time-date">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:inline-block; vertical-align:-2px; margin-right:4px;">
+                  <rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect>
+                  <line x1="16" y1="2" x2="16" y2="6"></line>
+                  <line x1="8" y1="2" x2="8" y2="6"></line>
+                  <line x1="3" y1="10" x2="21" y2="10"></line>
+                </svg>
+                Fecha
+              </label>
+              <input
+                type="date"
+                id="time-date"
+                class="form-input"
+                value={todayStr}
+                max={todayStr}
+                required
+              />
+            </div>
+
+            <div class="form-group note-field-group">
               <label class="form-label" for="time-note">Nota (opcional)</label>
-              <input type="text" id="time-note" class="form-input" placeholder="Ej: Completé el capítulo 3" />
+              <input
+                type="text"
+                id="time-note"
+                class="form-input"
+                placeholder="Ej: Completé el capítulo 3"
+              />
             </div>
           </div>
 
@@ -362,23 +417,76 @@ function formatDate(dateStr: string): string {
   .time-form-row {
     display: flex;
     align-items: flex-end;
-    gap: var(--space-xl);
+    gap: var(--space-lg);
     flex-wrap: wrap;
-  }
-
-  .time-input-wrapper {
-    flex-shrink: 0;
   }
 
   .time-form-fields {
     display: flex;
     gap: var(--space-md);
     flex: 1;
-    min-width: 300px;
+    min-width: 320px;
+    flex-wrap: wrap;
   }
 
-  .time-form-fields .form-group {
-    flex: 1;
+  .time-hms-group {
+    flex: 0 0 auto;
+  }
+
+  .time-hms-container {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .time-hms-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .time-hms-input {
+    width: 60px;
+    height: 42px;
+    padding: 0.4rem 0.25rem;
+    text-align: center;
+    font-family: var(--font-display);
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+  }
+
+  .time-hms-input::placeholder {
+    color: var(--color-text-muted);
+    opacity: 0.45;
+  }
+
+  .time-hms-colon {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--color-text-muted);
+    line-height: 42px;
+    user-select: none;
+  }
+
+  .time-hms-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .date-field-group {
+    flex: 0 0 180px;
+    min-width: 160px;
+  }
+
+  .note-field-group {
+    flex: 1 1 200px;
+    min-width: 180px;
   }
 
   .time-form-submit {
@@ -461,14 +569,30 @@ function formatDate(dateStr: string): string {
       align-items: stretch;
     }
 
-    .time-input-wrapper {
-      display: flex;
-      justify-content: center;
-    }
-
     .time-form-fields {
       flex-direction: column;
       min-width: 0;
+    }
+
+    .time-hms-group {
+      width: 100%;
+    }
+
+    .time-hms-container {
+      justify-content: center;
+      width: 100%;
+    }
+
+    .time-hms-input {
+      width: 68px;
+      height: 44px;
+      font-size: 1.2rem;
+    }
+
+    .date-field-group,
+    .note-field-group {
+      flex: 1 1 100%;
+      width: 100%;
     }
 
     .time-form-submit {
@@ -482,27 +606,126 @@ function formatDate(dateStr: string): string {
 </style>
 
 <script define:vars={{ gameId: id }}>
+  function getLocalDateStr() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
   const form = document.getElementById('time-form');
+  const hoursInput = document.getElementById('time-hours');
+  const minutesInput = document.getElementById('time-minutes');
+  const secondsInput = document.getElementById('time-seconds');
+  const dateInput = document.getElementById('time-date');
+
+  // Initialize date with local today and block future dates
+  if (dateInput) {
+    const today = getLocalDateStr();
+    dateInput.value = today;
+    dateInput.max = today;
+
+    dateInput.addEventListener('change', () => {
+      const currentToday = getLocalDateStr();
+      if (dateInput.value > currentToday) {
+        showToast('No se permiten fechas futuras', 'error');
+        dateInput.value = currentToday;
+      }
+    });
+  }
+
+  // Smooth numeric typing and auto-advancing between HMS inputs
+  function setupHmsInput(input, maxLen, nextInput, prevInput) {
+    if (!input) return;
+
+    input.addEventListener('input', (e) => {
+      let val = input.value.replace(/[^0-9]/g, '');
+      if (val.length > maxLen) val = val.slice(0, maxLen);
+      input.value = val;
+
+      if (val.length >= maxLen && nextInput) {
+        nextInput.focus();
+        nextInput.select();
+      }
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if ((e.key === ':' || e.key === 'Enter') && nextInput) {
+        e.preventDefault();
+        nextInput.focus();
+        nextInput.select();
+      } else if (e.key === 'Backspace' && input.value === '' && prevInput) {
+        prevInput.focus();
+      }
+    });
+
+    input.addEventListener('blur', () => {
+      if (input.value && input.value.length === 1 && input !== hoursInput) {
+        input.value = input.value.padStart(2, '0');
+      }
+    });
+  }
+
+  setupHmsInput(hoursInput, 3, minutesInput, null);
+  setupHmsInput(minutesInput, 2, secondsInput, hoursInput);
+  setupHmsInput(secondsInput, 2, null, minutesInput);
 
   form?.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    const hours = parseInt(document.getElementById('time-hours').value) || 0;
-    const minutes = parseInt(document.getElementById('time-minutes').value) || 0;
-    const seconds = parseInt(document.getElementById('time-seconds').value) || 0;
-    const played_at = document.getElementById('time-date').value;
-    const note = document.getElementById('time-note').value.trim();
+    let hours = parseInt(hoursInput?.value || '0', 10);
+    let minutes = parseInt(minutesInput?.value || '0', 10);
+    let seconds = parseInt(secondsInput?.value || '0', 10);
+
+    if (isNaN(hours)) hours = 0;
+    if (isNaN(minutes)) minutes = 0;
+    if (isNaN(seconds)) seconds = 0;
+
+    // Normalize if seconds or minutes exceed 59
+    if (seconds >= 60) {
+      minutes += Math.floor(seconds / 60);
+      seconds = seconds % 60;
+    }
+    if (minutes >= 60) {
+      hours += Math.floor(minutes / 60);
+      minutes = minutes % 60;
+    }
 
     if (hours === 0 && minutes === 0 && seconds === 0) {
       showToast('El tiempo debe ser mayor a 0', 'error');
+      hoursInput?.focus();
       return;
     }
+
+    const today = getLocalDateStr();
+    const played_at = dateInput ? dateInput.value : today;
+
+    if (!played_at) {
+      showToast('Selecciona una fecha', 'error');
+      return;
+    }
+
+    if (played_at > today) {
+      showToast('No se permiten fechas futuras', 'error');
+      if (dateInput) dateInput.value = today;
+      return;
+    }
+
+    const note = (document.getElementById('time-note')?.value || '').trim();
 
     try {
       const res = await fetch('/api/time-entries', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_id: gameId, hours, minutes, seconds, played_at, note }),
+        body: JSON.stringify({
+          game_id: gameId,
+          hours,
+          minutes,
+          seconds,
+          played_at,
+          note,
+        }),
       });
 
       if (res.ok) {

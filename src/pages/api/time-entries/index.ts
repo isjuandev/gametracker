@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { supabase } from '../../../lib/supabase';
+import { getLocalDateStr } from '../../../types/database';
 
 export const GET: APIRoute = async ({ url }) => {
   const gameId = url.searchParams.get('game_id');
@@ -47,6 +48,16 @@ export const POST: APIRoute = async ({ request }) => {
     });
   }
 
+  const todayStr = getLocalDateStr(new Date());
+  const entryDate = played_at || todayStr;
+
+  if (entryDate > todayStr) {
+    return new Response(JSON.stringify({ error: 'No se permiten registrar fechas futuras' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const h = Math.max(0, parseInt(hours) || 0);
   const m = Math.max(0, Math.min(59, parseInt(minutes) || 0));
   const s = Math.max(0, Math.min(59, parseInt(seconds) || 0));
@@ -65,7 +76,7 @@ export const POST: APIRoute = async ({ request }) => {
       hours: h,
       minutes: m,
       seconds: s,
-      played_at: played_at || new Date().toISOString().split('T')[0],
+      played_at: entryDate,
       note: note || null,
     })
     .select()
